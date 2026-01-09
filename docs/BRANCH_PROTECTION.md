@@ -2,6 +2,24 @@
 
 This document describes the branch protection rules configured for the `main` branch to ensure code quality and prevent accidental or harmful changes.
 
+## Prerequisites
+
+### Repository Visibility Requirements
+
+**Important:** Branch protection rules have different requirements based on repository visibility:
+
+| Repository Type | Branch Protection | Requirements |
+|----------------|-------------------|--------------|
+| **Public** | ✓ Free | No additional requirements |
+| **Private** | ✓ Requires GitHub Pro | Must upgrade to GitHub Pro, GitHub Team, or GitHub Enterprise |
+
+**Current Repository Status:**
+- **Repository:** [amendez13/OutMyLook](https://github.com/amendez13/OutMyLook)
+- **Visibility:** Public
+- **Branch Protection:** Enabled ✓
+
+> **Note:** This repository was made public specifically to enable branch protection without requiring GitHub Pro. If you need to keep your repository private, you'll need to upgrade your GitHub plan or work without branch protection enforcement (CI will still run on all pushes and PRs).
+
 ## Quick Start
 
 **To apply branch protection, choose one option:**
@@ -13,7 +31,7 @@ This document describes the branch protection rules configured for the `main` br
 
 ### Option B: GitHub CLI One-Liner
 ```bash
-gh api -X PUT /repos/your-username/OutMyLook/branches/main/protection \
+gh api -X PUT /repos/amendez13/OutMyLook/branches/main/protection \
   --input scripts/github/branch-protection-config.json
 ```
 
@@ -79,11 +97,13 @@ All CI checks must pass before merging:
 Run this command to apply the branch protection configuration:
 
 ```bash
-gh api -X PUT /repos/your-username/OutMyLook/branches/main/protection \
+gh api -X PUT /repos/amendez13/OutMyLook/branches/main/protection \
   --input scripts/github/branch-protection-config.json
 ```
 
 The configuration file is located at `scripts/github/branch-protection-config.json`.
+
+**Note:** The automated script (`./scripts/github/setup-branch-protection.sh`) already has the correct repository path configured.
 
 ### Option 2: Manual Configuration via GitHub UI
 
@@ -109,6 +129,44 @@ The configuration file is located at `scripts/github/branch-protection-config.js
 - [x] Include administrators
 
 6. Click **Create** or **Save changes**
+
+## Verifying Branch Protection
+
+After applying branch protection, verify it's working correctly:
+
+### Check via GitHub CLI
+
+```bash
+# Check if branch protection is enabled
+gh api /repos/amendez13/OutMyLook/branches/main/protection --jq '.required_status_checks.contexts'
+
+# Expected output:
+# [
+#   "Lint and Code Quality",
+#   "Test Python 3.10",
+#   "Test Python 3.11",
+#   "Test Python 3.12",
+#   "Validate Configuration",
+#   "CI Status Check"
+# ]
+```
+
+### Check via GitHub UI
+
+Visit: https://github.com/amendez13/OutMyLook/settings/branches
+
+You should see a protection rule for the `main` branch with all configured settings.
+
+### Test with a Pull Request
+
+1. Create a feature branch: `git checkout -b test/branch-protection`
+2. Make a small change and commit it
+3. Push to GitHub: `git push -u origin test/branch-protection`
+4. Create a PR on GitHub
+5. Verify that:
+   - CI checks run automatically
+   - Merge button is blocked until checks pass
+   - You cannot force push to `main`
 
 ## Working with Branch Protection
 
@@ -153,6 +211,32 @@ git push --force-with-lease origin your-branch
 ```
 
 ## Troubleshooting
+
+### "Upgrade to GitHub Pro or make this repository public to enable this feature"
+
+**Error:**
+```
+{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}
+```
+
+**Cause:** Branch protection on private repositories requires GitHub Pro or higher.
+
+**Solutions:**
+
+1. **Make repository public (Free):**
+   ```bash
+   gh repo edit amendez13/OutMyLook --visibility public --accept-visibility-change-consequences
+   ```
+
+2. **Upgrade to GitHub Pro:**
+   - Visit GitHub Settings → Billing
+   - Subscribe to GitHub Pro ($4/month as of 2024)
+   - Includes branch protection for unlimited private repos
+
+3. **Work without branch protection enforcement:**
+   - CI will still run on all pushes and PRs
+   - You'll need to manually verify CI passes before merging
+   - Use discipline to avoid force pushes and direct commits to main
 
 ### "Required status check is expected but not reported"
 
