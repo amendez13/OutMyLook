@@ -14,7 +14,7 @@ This document describes the branch protection rules configured for the `main` br
 | **Private** | ✓ Requires GitHub Pro | Must upgrade to GitHub Pro, GitHub Team, or GitHub Enterprise |
 
 **Current Repository Status:**
-- **Repository:** [amendez13/OutMyLook](https://github.com/amendez13/OutMyLook)
+- **Repository:** Check with `gh repo view --json nameWithOwner -q .nameWithOwner`
 - **Visibility:** Public
 - **Branch Protection:** Enabled ✓
 
@@ -31,7 +31,8 @@ This document describes the branch protection rules configured for the `main` br
 
 ### Option B: GitHub CLI One-Liner
 ```bash
-gh api -X PUT /repos/amendez13/OutMyLook/branches/main/protection \
+# Replace <owner>/<repo> with your repository (or use: gh repo view --json nameWithOwner -q .nameWithOwner)
+gh api -X PUT /repos/<owner>/<repo>/branches/main/protection \
   --input scripts/github/branch-protection-config.json
 ```
 
@@ -97,7 +98,8 @@ All CI checks must pass before merging:
 Run this command to apply the branch protection configuration:
 
 ```bash
-gh api -X PUT /repos/amendez13/OutMyLook/branches/main/protection \
+# Replace <owner>/<repo> with your repository (or use: gh repo view --json nameWithOwner -q .nameWithOwner)
+gh api -X PUT /repos/<owner>/<repo>/branches/main/protection \
   --input scripts/github/branch-protection-config.json
 ```
 
@@ -137,8 +139,8 @@ After applying branch protection, verify it's working correctly:
 ### Check via GitHub CLI
 
 ```bash
-# Check if branch protection is enabled
-gh api /repos/amendez13/OutMyLook/branches/main/protection --jq '.required_status_checks.contexts'
+# Check if branch protection is enabled (replace <owner>/<repo> with your repository)
+gh api /repos/<owner>/<repo>/branches/main/protection --jq '.required_status_checks.contexts'
 
 # Expected output:
 # [
@@ -153,7 +155,7 @@ gh api /repos/amendez13/OutMyLook/branches/main/protection --jq '.required_statu
 
 ### Check via GitHub UI
 
-Visit: https://github.com/amendez13/OutMyLook/settings/branches
+Visit your repository's branch settings at: `https://github.com/<owner>/<repo>/settings/branches`
 
 You should see a protection rule for the `main` branch with all configured settings.
 
@@ -225,7 +227,8 @@ git push --force-with-lease origin your-branch
 
 1. **Make repository public (Free):**
    ```bash
-   gh repo edit amendez13/OutMyLook --visibility public --accept-visibility-change-consequences
+   # Replace <owner>/<repo> with your repository
+   gh repo edit <owner>/<repo> --visibility public --accept-visibility-change-consequences
    ```
 
 2. **Upgrade to GitHub Pro:**
