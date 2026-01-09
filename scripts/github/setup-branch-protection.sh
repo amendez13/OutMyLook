@@ -5,7 +5,7 @@
 
 set -e  # Exit on error
 
-REPO="your-username/OutMyLook"
+REPO="amendez13/OutMyLook"
 BRANCH="main"
 CONFIG_FILE="$(dirname "$0")/branch-protection-config.json"
 

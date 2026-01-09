@@ -1,6 +1,6 @@
 """Tests for the main module."""
 
-from src.main import greet
+from src.main import greet, main
 
 
 class TestGreet:
@@ -38,3 +38,13 @@ class TestSampleData:
     def test_sample_data_has_number(self, sample_data: dict) -> None:
         """Test that sample_data fixture has expected number."""
         assert sample_data["number"] == 42
+
+
+class TestMain:
+    """Tests for the main function."""
+
+    def test_main_prints_greeting(self, capsys) -> None:
+        """Test that main prints a greeting."""
+        main()
+        captured = capsys.readouterr()
+        assert captured.out == "Hello, World!\n"
