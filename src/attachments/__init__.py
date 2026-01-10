@@ -1,0 +1,1 @@
+"""Email attachments handling module."""
