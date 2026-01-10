@@ -4,13 +4,14 @@
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![Coverage](https://img.shields.io/badge/coverage-95%25-green.svg)
 
-A Python project
+A Python application for managing Microsoft Outlook emails using the Microsoft Graph API.
 
 ## Features
 
-- Feature 1: Description
-- Feature 2: Description
-- Feature 3: Description
+- **OAuth2 Authentication**: Secure authentication with Microsoft Graph using Device Code Flow
+- **Token Caching**: Persistent token storage for seamless re-authentication
+- **CLI Interface**: User-friendly command-line interface for email management
+- **Automatic Token Refresh**: Tokens automatically refreshed before expiration
 
 ## Quick Start
 
@@ -18,6 +19,8 @@ A Python project
 
 - Python 3.10 or higher
 - pip (Python package installer)
+- Microsoft account (@outlook.com, @hotmail.com, @live.com, or organizational account)
+- Azure AD application registration (see [Setup Guide](docs/SETUP.md) for details)
 
 ### Installation
 
@@ -49,9 +52,29 @@ cp config/config.example.yaml config/config.yaml
 
 ### Usage
 
+#### Authentication
+
+First, authenticate with your Microsoft account:
+
 ```bash
-# Run the application
-python -m src.main
+# Login with Device Code Flow
+python -m src.cli login
+
+# Check authentication status
+python -m src.cli status
+
+# Logout (clear cached tokens)
+python -m src.cli logout
+```
+
+The login command will display a URL and device code. Visit the URL in your browser and enter the code to complete authentication. Your tokens will be cached securely for future use.
+
+#### Email Management
+
+```bash
+# Coming in future releases
+# python -m src.cli fetch    # Fetch emails
+# python -m src.cli search   # Search emails
 ```
 
 ## Configuration
@@ -59,13 +82,35 @@ python -m src.main
 Configuration is stored in `config/config.yaml`. See `config/config.example.yaml` for all available options.
 
 ```yaml
-# Example configuration
-app:
-  debug: false
-  log_level: INFO
+# Azure AD Application Settings
+azure:
+  # Your Azure AD application (client) ID
+  client_id: "your-azure-app-client-id"
 
-# Add your configuration sections here
+  # Tenant ID - use "common" for personal Microsoft accounts
+  tenant: "common"
+
+  # Microsoft Graph API scopes
+  scopes:
+    - "https://graph.microsoft.com/Mail.Read"
+    - "https://graph.microsoft.com/User.Read"
+    - "offline_access"
+
+# Database Configuration
+database:
+  url: "sqlite:///~/.outmylook/emails.db"
+
+# Storage Settings
+storage:
+  attachments_dir: "~/.outmylook/attachments"
+  token_file: "~/.outmylook/tokens.json"
+
+# Logging Configuration
+logging:
+  level: "INFO"
 ```
+
+**Important**: You need to register an Azure AD application to get your `client_id`. See [Setup Guide](docs/SETUP.md) for detailed instructions.
 
 ## Project Structure
 
