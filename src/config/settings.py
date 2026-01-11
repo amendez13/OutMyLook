@@ -11,7 +11,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class AzureSettings(BaseSettings):
+class AzureSettings(BaseSettings):  # type: ignore[misc]
     """Azure AD configuration settings."""
 
     client_id: str = Field(
@@ -34,7 +34,7 @@ class AzureSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AZURE_")
 
 
-class DatabaseSettings(BaseSettings):
+class DatabaseSettings(BaseSettings):  # type: ignore[misc]
     """Database configuration settings."""
 
     url: str = Field(
@@ -42,7 +42,7 @@ class DatabaseSettings(BaseSettings):
         description="Database connection URL",
     )
 
-    @field_validator("url")
+    @field_validator("url")  # type: ignore[misc]
     @classmethod
     def expand_path(cls, v: str) -> str:
         """Expand user home directory in database URL."""
@@ -54,7 +54,7 @@ class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DATABASE_")
 
 
-class StorageSettings(BaseSettings):
+class StorageSettings(BaseSettings):  # type: ignore[misc]
     """Storage configuration settings."""
 
     attachments_dir: str = Field(
@@ -66,7 +66,7 @@ class StorageSettings(BaseSettings):
         description="File for storing authentication tokens",
     )
 
-    @field_validator("attachments_dir", "token_file")
+    @field_validator("attachments_dir", "token_file")  # type: ignore[misc]
     @classmethod
     def expand_path(cls, v: str) -> str:
         """Expand user home directory in paths."""
@@ -75,7 +75,7 @@ class StorageSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STORAGE_")
 
 
-class LoggingSettings(BaseSettings):
+class LoggingSettings(BaseSettings):  # type: ignore[misc]
     """Logging configuration settings."""
 
     level: str = Field(
@@ -83,7 +83,7 @@ class LoggingSettings(BaseSettings):
         description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
     )
 
-    @field_validator("level")
+    @field_validator("level")  # type: ignore[misc]
     @classmethod
     def validate_level(cls, v: str) -> str:
         """Validate logging level."""
@@ -96,7 +96,7 @@ class LoggingSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LOGGING_")
 
 
-class Settings(BaseSettings):
+class Settings(BaseSettings):  # type: ignore[misc]
     """Main application settings."""
 
     azure: AzureSettings = Field(default_factory=AzureSettings)
