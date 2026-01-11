@@ -1,30 +1,8 @@
 """Tests for the main module."""
 
-from src.main import greet, main
+from unittest.mock import patch
 
-
-class TestGreet:
-    """Tests for the greet function."""
-
-    def test_greet_default(self) -> None:
-        """Test greeting with default name."""
-        result = greet()
-        assert result == "Hello, World!"
-
-    def test_greet_with_name(self) -> None:
-        """Test greeting with a specific name."""
-        result = greet("Alice")
-        assert result == "Hello, Alice!"
-
-    def test_greet_with_none(self) -> None:
-        """Test greeting with None explicitly passed."""
-        result = greet(None)
-        assert result == "Hello, World!"
-
-    def test_greet_with_empty_string(self) -> None:
-        """Test greeting with empty string."""
-        result = greet("")
-        assert result == "Hello, !"
+from src.main import main
 
 
 class TestSampleData:
@@ -43,8 +21,8 @@ class TestSampleData:
 class TestMain:
     """Tests for the main function."""
 
-    def test_main_prints_greeting(self, capsys) -> None:
-        """Test that main prints a greeting."""
+    @patch("src.main.cli_main")
+    def test_main_calls_cli(self, mock_cli_main) -> None:
+        """Test that main calls the CLI main function."""
         main()
-        captured = capsys.readouterr()
-        assert captured.out == "Hello, World!\n"
+        mock_cli_main.assert_called_once()
