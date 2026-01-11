@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 from azure.identity import DeviceCodeCredential
-from msgraph import GraphServiceClient  # type: ignore[attr-defined]
+from msgraph import GraphServiceClient
 
 from src.auth.token_cache import TokenCache
 from src.config.settings import AzureSettings
