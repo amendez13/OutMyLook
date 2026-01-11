@@ -27,10 +27,22 @@ jobs:
       id-token: write
       actions: read        # Required for Claude to read CI results on PRs
     steps:
+      - name: Get PR head ref
+        id: pr-ref
+        if: github.event.issue.pull_request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER="${{ github.event.issue.number }}"
+          PR_DATA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefName)
+          HEAD_REF=$(echo "$PR_DATA" | jq -r '.headRefName')
+          echo "ref=$HEAD_REF" >> $GITHUB_OUTPUT
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+          ref: ${{ steps.pr-ref.outputs.ref || github.ref }}
 
       - name: Run Claude Code
         id: claude
