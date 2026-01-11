@@ -253,12 +253,14 @@ class TestGraphAuthenticator:
         )
 
     @pytest.fixture
-    def mock_token_cache(self) -> Mock:
+    def mock_token_cache(self, tmp_path: Path) -> Mock:
         """Create mock TokenCache."""
         cache = Mock(spec=TokenCache)
         cache.has_valid_token.return_value = False
         cache.save_token = AsyncMock()
         cache.clear = AsyncMock()
+        # Add token_file attribute for CachedTokenCredential cache_dir detection
+        cache.token_file = tmp_path / "tokens.json"
         return cache
 
     @pytest.fixture
@@ -438,9 +440,25 @@ class TestGraphAuthenticator:
         assert client == mock_client
 
     @pytest.mark.asyncio
-    async def test_refresh_token(self, authenticator: GraphAuthenticator) -> None:
-        """Test token refresh clears cache and gets new token."""
-        # Mock the credential to avoid device code flow
+    async def test_refresh_token_with_existing_credential(self, authenticator: GraphAuthenticator) -> None:
+        """Test token refresh uses existing credential (preserves MSAL cache)."""
+        # Set up existing credential
+        mock_credential = Mock()
+        mock_credential.get_token = Mock(return_value=Mock(token="refreshed_token", expires_on=789012))
+        authenticator._credential = mock_credential
+
+        await authenticator.refresh_token()
+
+        # Cache should be cleared
+        authenticator.token_cache.clear.assert_called_once()
+        # Existing credential should be reused (not recreated)
+        mock_credential.get_token.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_refresh_token_creates_credential_if_none(self, authenticator: GraphAuthenticator) -> None:
+        """Test token refresh creates credential if none exists."""
+        authenticator._credential = None
+
         with patch.object(authenticator, "_create_credential") as mock_create:
             mock_credential = Mock()
             mock_credential.get_token = Mock(return_value=Mock(token="new_token", expires_on=789012))
@@ -450,7 +468,7 @@ class TestGraphAuthenticator:
 
             # Cache should be cleared first
             authenticator.token_cache.clear.assert_called_once()
-            # New credential should be created
+            # New credential should be created since none existed
             mock_create.assert_called_once()
             # get_token should be called to get fresh token
             mock_credential.get_token.assert_called_once()
@@ -458,14 +476,12 @@ class TestGraphAuthenticator:
     @pytest.mark.asyncio
     async def test_refresh_token_failure(self, authenticator: GraphAuthenticator) -> None:
         """Test token refresh failure."""
-        # Mock the credential to simulate failure
-        with patch.object(authenticator, "_create_credential") as mock_create:
-            mock_credential = Mock()
-            mock_credential.get_token = Mock(side_effect=Exception("Refresh failed"))
-            mock_create.return_value = mock_credential
+        mock_credential = Mock()
+        mock_credential.get_token = Mock(side_effect=Exception("Refresh failed"))
+        authenticator._credential = mock_credential
 
-            with pytest.raises(AuthenticationError, match="Token refresh failed"):
-                await authenticator.refresh_token()
+        with pytest.raises(AuthenticationError, match="Token refresh failed"):
+            await authenticator.refresh_token()
 
     @pytest.mark.asyncio
     async def test_logout(self, authenticator: GraphAuthenticator) -> None:
@@ -525,11 +541,13 @@ class TestCachedTokenCredential:
     """Tests for CachedTokenCredential class."""
 
     @pytest.fixture
-    def mock_token_cache(self) -> Mock:
+    def mock_token_cache(self, tmp_path: Path) -> Mock:
         """Create mock TokenCache."""
         cache = Mock(spec=TokenCache)
         cache.has_valid_token.return_value = False
         cache.save_token = AsyncMock()
+        # Add token_file attribute for cache_dir detection
+        cache.token_file = tmp_path / "tokens.json"
         return cache
 
     @pytest.fixture
@@ -550,6 +568,20 @@ class TestCachedTokenCredential:
         assert credential._token_cache is not None
         assert credential._device_code_credential is None
 
+    def test_init_with_explicit_cache_dir(self, tmp_path: Path) -> None:
+        """Test CachedTokenCredential with explicit cache_dir."""
+        from src.auth.authenticator import CachedTokenCredential
+
+        cache_dir = tmp_path / "custom_cache"
+        credential = CachedTokenCredential(
+            client_id="test-client-id",
+            tenant_id="test-tenant",
+            cache_dir=cache_dir,
+        )
+
+        assert credential._cache_dir == cache_dir
+        assert cache_dir.exists()  # Should be created
+
     @patch("src.auth.authenticator.DeviceCodeCredential")
     def test_get_device_code_credential_creates_once(
         self, mock_device_code: Mock, credential: "CachedTokenCredential"
@@ -566,89 +598,66 @@ class TestCachedTokenCredential:
         assert mock_device_code.call_count == 1
         assert cred1 is cred2
 
-    def test_get_token_uses_cached_token(self, credential: "CachedTokenCredential") -> None:
-        """Test get_token returns cached token when available."""
-        credential._token_cache.has_valid_token.return_value = True
-        credential._token_cache._read_token_file = Mock(
-            return_value={"access_token": "cached_token_123", "expires_on": 999999}
-        )
-
-        token = credential.get_token("scope1", "scope2")
-
-        assert token.token == "cached_token_123"
-        assert token.expires_on == 999999
-        credential._token_cache.has_valid_token.assert_called_once()
-
-    def test_get_token_cache_read_failure_falls_back(self, credential: "CachedTokenCredential") -> None:
-        """Test get_token falls back to device code when cache read fails."""
-        credential._token_cache.has_valid_token.return_value = True
-        credential._token_cache._read_token_file = Mock(side_effect=Exception("Read failed"))
-
+    def test_get_token_delegates_to_azure_sdk(self, credential: "CachedTokenCredential") -> None:
+        """Test get_token delegates to Azure SDK's DeviceCodeCredential."""
         with patch.object(credential, "_get_device_code_credential") as mock_get_cred:
             mock_device_cred = Mock()
-            mock_device_cred.get_token.return_value = Mock(token="new_token", expires_on=123456)
-            mock_get_cred.return_value = mock_device_cred
-
-            token = credential.get_token("scope1")
-
-            assert token.token == "new_token"
-            mock_get_cred.assert_called_once()
-
-    @patch("src.auth.authenticator.asyncio")
-    def test_get_token_caches_new_token_with_event_loop(self, mock_asyncio: Mock, credential: "CachedTokenCredential") -> None:
-        """Test get_token caches new token when event loop exists."""
-        credential._token_cache.has_valid_token.return_value = False
-
-        mock_loop = Mock()
-        mock_asyncio.get_event_loop.return_value = mock_loop
-
-        with patch.object(credential, "_get_device_code_credential") as mock_get_cred:
-            mock_device_cred = Mock()
-            mock_device_cred.get_token.return_value = Mock(token="new_token", expires_on=123456)
+            mock_device_cred.get_token.return_value = Mock(token="sdk_token", expires_on=123456)
             mock_get_cred.return_value = mock_device_cred
 
             token = credential.get_token("scope1", "scope2")
 
-            assert token.token == "new_token"
-            mock_loop.run_until_complete.assert_called_once()
+            assert token.token == "sdk_token"
+            assert token.expires_on == 123456
+            mock_get_cred.assert_called_once()
+            mock_device_cred.get_token.assert_called_once()
 
-    @patch("src.auth.authenticator.asyncio")
-    def test_get_token_caches_new_token_without_event_loop(
-        self, mock_asyncio: Mock, credential: "CachedTokenCredential"
-    ) -> None:
-        """Test get_token caches new token when no event loop (uses asyncio.run)."""
-        credential._token_cache.has_valid_token.return_value = False
-
-        mock_asyncio.get_event_loop.side_effect = RuntimeError("No event loop")
-
+    def test_get_token_updates_local_cache(self, credential: "CachedTokenCredential") -> None:
+        """Test get_token updates our local cache after getting token from SDK."""
         with patch.object(credential, "_get_device_code_credential") as mock_get_cred:
             mock_device_cred = Mock()
             mock_device_cred.get_token.return_value = Mock(token="new_token", expires_on=123456)
             mock_get_cred.return_value = mock_device_cred
 
-            token = credential.get_token("scope1")
+            with patch.object(credential, "_save_to_cache") as mock_save:
+                token = credential.get_token("scope1")
 
-            assert token.token == "new_token"
-            mock_asyncio.run.assert_called_once()
+                assert token.token == "new_token"
+                mock_save.assert_called_once()
 
     @patch("src.auth.authenticator.asyncio")
-    def test_get_token_handles_cache_save_failure(self, mock_asyncio: Mock, credential: "CachedTokenCredential") -> None:
-        """Test get_token handles cache save failures gracefully."""
-        credential._token_cache.has_valid_token.return_value = False
-
+    def test_save_to_cache_with_event_loop(self, mock_asyncio: Mock, credential: "CachedTokenCredential") -> None:
+        """Test _save_to_cache uses event loop when available."""
         mock_loop = Mock()
-        mock_loop.run_until_complete.side_effect = Exception("Save failed")
         mock_asyncio.get_event_loop.return_value = mock_loop
 
+        token = Mock(token="new_token", expires_on=123456)
+        credential._save_to_cache(token, ["scope1", "scope2"])
+
+        mock_loop.run_until_complete.assert_called_once()
+
+    @patch("src.auth.authenticator.asyncio")
+    def test_save_to_cache_without_event_loop(self, mock_asyncio: Mock, credential: "CachedTokenCredential") -> None:
+        """Test _save_to_cache uses asyncio.run when no event loop."""
+        mock_asyncio.get_event_loop.side_effect = RuntimeError("No event loop")
+
+        token = Mock(token="new_token", expires_on=123456)
+        credential._save_to_cache(token, ["scope1"])
+
+        mock_asyncio.run.assert_called_once()
+
+    def test_get_token_handles_cache_save_failure(self, credential: "CachedTokenCredential") -> None:
+        """Test get_token handles cache save failures gracefully."""
         with patch.object(credential, "_get_device_code_credential") as mock_get_cred:
             mock_device_cred = Mock()
             mock_device_cred.get_token.return_value = Mock(token="new_token", expires_on=123456)
             mock_get_cred.return_value = mock_device_cred
 
-            # Should not raise, just log warning
-            token = credential.get_token("scope1")
+            with patch.object(credential, "_save_to_cache", side_effect=Exception("Save failed")):
+                # Should not raise, just log warning
+                token = credential.get_token("scope1")
 
-            assert token.token == "new_token"
+                assert token.token == "new_token"
 
     def test_get_token_no_cache(self) -> None:
         """Test get_token works without token cache."""

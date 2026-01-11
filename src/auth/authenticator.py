@@ -2,10 +2,11 @@
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any, Optional
 
 from azure.core.credentials import AccessToken, TokenCredential
-from azure.identity import DeviceCodeCredential
+from azure.identity import DeviceCodeCredential, TokenCachePersistenceOptions
 from msgraph import GraphServiceClient
 
 from src.auth.token_cache import TokenCache
@@ -15,11 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 class CachedTokenCredential(TokenCredential):
-    """A TokenCredential that uses cached tokens when available.
+    """A TokenCredential that uses Azure SDK's persistent token cache.
 
-    This credential checks the token cache first. If a valid token exists,
-    it returns that token. Otherwise, it delegates to DeviceCodeCredential
-    to perform interactive authentication and caches the result.
+    This credential uses Azure Identity SDK's built-in token cache persistence,
+    which stores both access tokens and refresh tokens. This enables:
+    - Silent token refresh using refresh tokens (no user interaction)
+    - Persistent authentication across sessions
+    - Automatic token refresh when access token expires
+
+    The credential only triggers device code flow when:
+    - No cached tokens exist, or
+    - The refresh token has expired or been revoked
     """
 
     def __init__(
@@ -27,26 +34,53 @@ class CachedTokenCredential(TokenCredential):
         client_id: str,
         tenant_id: str,
         token_cache: Optional[TokenCache] = None,
+        cache_dir: Optional[Path] = None,
     ):
         """Initialize the CachedTokenCredential.
 
         Args:
             client_id: Azure AD application (client) ID
             tenant_id: Azure AD tenant ID
-            token_cache: Optional token cache for persistent storage
+            token_cache: Optional token cache for access token tracking
+            cache_dir: Directory for MSAL token cache (defaults to token_cache dir)
         """
         self._client_id = client_id
         self._tenant_id = tenant_id
         self._token_cache = token_cache
         self._device_code_credential: Optional[DeviceCodeCredential] = None
 
+        # Determine cache directory for MSAL token cache
+        if cache_dir:
+            self._cache_dir = cache_dir
+        elif token_cache:
+            self._cache_dir = token_cache.token_file.parent
+        else:
+            self._cache_dir = Path.home() / ".outmylook"
+
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+
     def _get_device_code_credential(self) -> DeviceCodeCredential:
-        """Get or create the DeviceCodeCredential."""
+        """Get or create the DeviceCodeCredential with persistent cache.
+
+        The credential is configured with TokenCachePersistenceOptions to enable:
+        - Persistent storage of access and refresh tokens
+        - Silent token refresh using refresh tokens
+        - Cross-session authentication
+        """
         if self._device_code_credential is None:
+            # Enable persistent token caching for refresh token support
+            cache_options = TokenCachePersistenceOptions(
+                name="outmylook_msal_cache",
+                allow_unencrypted_storage=True,  # Required for non-GUI environments
+            )
+
             self._device_code_credential = DeviceCodeCredential(
                 client_id=self._client_id,
                 tenant_id=self._tenant_id,
+                cache_persistence_options=cache_options,
             )
+            logger.debug("Created DeviceCodeCredential with persistent token cache")
+
         return self._device_code_credential
 
     def get_token(
@@ -59,8 +93,10 @@ class CachedTokenCredential(TokenCredential):
     ) -> AccessToken:
         """Get an access token for the specified scopes.
 
-        First checks the token cache. If a valid token exists, returns it.
-        Otherwise, initiates device code flow and caches the result.
+        The Azure SDK handles token caching and refresh automatically:
+        1. If a valid cached access token exists, returns it
+        2. If access token expired but refresh token valid, silently refreshes
+        3. Only triggers device code flow if no valid tokens exist
 
         Args:
             *scopes: The scopes for which the token is requested
@@ -72,39 +108,44 @@ class CachedTokenCredential(TokenCredential):
         Returns:
             An AccessToken with the token string and expiration time
         """
-        # Check cache first
-        if self._token_cache and self._token_cache.has_valid_token():
-            logger.info("Using cached authentication token")
-            # Load token from cache synchronously
-            try:
-                token_data = self._token_cache._read_token_file()
-                access_token = token_data.get("access_token", "")
-                expires_on = token_data.get("expires_on", 0)
-                return AccessToken(access_token, expires_on)
-            except Exception as e:
-                logger.warning(f"Failed to read cached token: {e}, falling back to device code flow")
-
-        # No valid cached token, use device code flow
-        logger.info("No valid cached token, initiating device code flow")
+        # Use Azure SDK's credential which handles caching and refresh
         credential = self._get_device_code_credential()
+
+        logger.debug("Requesting token from Azure SDK (will use cache/refresh if available)")
         token = credential.get_token(*scopes, claims=claims, tenant_id=tenant_id, enable_cae=enable_cae, **kwargs)
 
-        # Cache the new token
+        # Update our token cache for quick access checks
         if self._token_cache:
             try:
-                # Run async save in sync context
-                asyncio.get_event_loop().run_until_complete(
-                    self._token_cache.save_token(token.token, token.expires_on, list(scopes))
-                )
-                logger.debug("Token cached successfully")
-            except RuntimeError:
-                # No event loop running, create one
-                asyncio.run(self._token_cache.save_token(token.token, token.expires_on, list(scopes)))
-                logger.debug("Token cached successfully")
+                self._save_to_cache(token, list(scopes))
             except Exception as e:
-                logger.warning(f"Failed to cache token: {e}")
+                logger.warning(f"Failed to update token cache: {e}")
 
         return token
+
+    def _save_to_cache(self, token: AccessToken, scopes: list[str]) -> None:
+        """Save token to our cache for quick access checks."""
+        # If no TokenCache was provided, nothing to do.
+        if self._token_cache is None:
+            logger.debug("No token cache configured; skipping save.")
+            return
+
+        try:
+            # Try to run save_token on the event loop. If the current loop
+            # is already running, asyncio.get_event_loop().run_until_complete
+            # will raise a RuntimeError, so fall back to asyncio.run.
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    raise RuntimeError
+                loop.run_until_complete(self._token_cache.save_token(token.token, token.expires_on, scopes))
+            except RuntimeError:
+                asyncio.run(self._token_cache.save_token(token.token, token.expires_on, scopes))
+
+            logger.debug("Token cached successfully")
+        except Exception as exc:
+            # Don't fail authentication flow if caching fails; just log it.
+            logger.debug("Failed to save token to cache: %s", exc)
 
     async def close(self) -> None:
         """Close the credential."""
@@ -266,10 +307,15 @@ class GraphAuthenticator:
         return self._client
 
     async def refresh_token(self) -> None:
-        """Refresh expired token.
+        """Refresh the access token using the cached refresh token.
 
-        This forces a new device code flow to get a fresh token.
-        The CachedTokenCredential will cache the new token automatically.
+        The Azure SDK's DeviceCodeCredential with TokenCachePersistenceOptions
+        handles token refresh automatically. This method forces a token refresh
+        by requesting a new token - the SDK will use the cached refresh token
+        to obtain a new access token silently (without user interaction).
+
+        Only triggers device code flow if the refresh token has expired or
+        been revoked.
 
         Raises:
             AuthenticationError: If token refresh fails
@@ -277,15 +323,18 @@ class GraphAuthenticator:
         try:
             logger.info("Refreshing authentication token")
 
-            # Clear the cache to force a fresh authentication
+            # Clear our access token cache to ensure we get a fresh token
             if self.token_cache:
                 await self.token_cache.clear()
 
-            # Create a fresh credential and get a new token
-            self._credential = self._create_credential()
+            # Create credential if needed (preserves MSAL cache with refresh token)
+            if not self._credential:
+                self._credential = self._create_credential()
 
-            # Request new token - this will trigger device code flow
-            # since cache was cleared
+            # Request new token - Azure SDK will:
+            # 1. Check MSAL cache for refresh token
+            # 2. Use refresh token to get new access token silently
+            # 3. Only trigger device code flow if refresh token is invalid
             token = self._credential.get_token(*self.scopes)
 
             logger.info(f"Token refreshed successfully, expires at {token.expires_on}")
