@@ -3,12 +3,11 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from src.auth import AuthenticationError, GraphAuthenticator, TokenCache, TokenCacheError
+from src.auth import AuthenticationError, GraphAuthenticator, TokenCache
 from src.config.settings import AzureSettings
 
 
@@ -55,9 +54,7 @@ class TestTokenCache:
         assert oct(token_file.stat().st_mode)[-3:] == "600"
 
     @pytest.mark.asyncio
-    async def test_load_token(
-        self, token_cache: TokenCache, token_file: Path
-    ) -> None:
+    async def test_load_token(self, token_cache: TokenCache, token_file: Path) -> None:
         """Test loading token from cache."""
         # Save a token first
         test_data = {
@@ -80,9 +77,7 @@ class TestTokenCache:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_load_token_invalid_json(
-        self, token_cache: TokenCache, token_file: Path
-    ) -> None:
+    async def test_load_token_invalid_json(self, token_cache: TokenCache, token_file: Path) -> None:
         """Test loading token with invalid JSON."""
         with open(token_file, "w") as f:
             f.write("invalid json {")
@@ -94,9 +89,7 @@ class TestTokenCache:
         """Test has_valid_token when file doesn't exist."""
         assert not token_cache.has_valid_token()
 
-    def test_has_valid_token_expired(
-        self, token_cache: TokenCache, token_file: Path
-    ) -> None:
+    def test_has_valid_token_expired(self, token_cache: TokenCache, token_file: Path) -> None:
         """Test has_valid_token with expired token."""
         expired_data = {
             "access_token": "token",
@@ -109,9 +102,7 @@ class TestTokenCache:
 
         assert not token_cache.has_valid_token()
 
-    def test_has_valid_token_expiring_soon(
-        self, token_cache: TokenCache, token_file: Path
-    ) -> None:
+    def test_has_valid_token_expiring_soon(self, token_cache: TokenCache, token_file: Path) -> None:
         """Test has_valid_token with token expiring within buffer."""
         # Token expires in 2 minutes (less than 5 minute buffer)
         expires_soon_data = {
@@ -125,9 +116,7 @@ class TestTokenCache:
 
         assert not token_cache.has_valid_token()
 
-    def test_has_valid_token_valid(
-        self, token_cache: TokenCache, token_file: Path
-    ) -> None:
+    def test_has_valid_token_valid(self, token_cache: TokenCache, token_file: Path) -> None:
         """Test has_valid_token with valid token."""
         valid_data = {
             "access_token": "token",
@@ -140,9 +129,7 @@ class TestTokenCache:
 
         assert token_cache.has_valid_token()
 
-    def test_has_valid_token_missing_fields(
-        self, token_cache: TokenCache, token_file: Path
-    ) -> None:
+    def test_has_valid_token_missing_fields(self, token_cache: TokenCache, token_file: Path) -> None:
         """Test has_valid_token with missing required fields."""
         incomplete_data = {"access_token": "token"}  # Missing expires_on
 
@@ -171,9 +158,7 @@ class TestTokenCache:
         await token_cache.clear()
 
     @pytest.mark.asyncio
-    async def test_get_access_token(
-        self, token_cache: TokenCache, token_file: Path
-    ) -> None:
+    async def test_get_access_token(self, token_cache: TokenCache, token_file: Path) -> None:
         """Test getting access token from cache."""
         valid_data = {
             "access_token": "test_token_123",
@@ -194,9 +179,7 @@ class TestTokenCache:
         assert token is None
 
     @pytest.mark.asyncio
-    async def test_get_token_info(
-        self, token_cache: TokenCache, token_file: Path
-    ) -> None:
+    async def test_get_token_info(self, token_cache: TokenCache, token_file: Path) -> None:
         """Test getting full token information."""
         expires_on = int(datetime.now(timezone.utc).timestamp()) + 3600
         cached_at = datetime.now(timezone.utc).isoformat()
@@ -226,9 +209,7 @@ class TestTokenCache:
         info = await token_cache.get_token_info()
         assert info is None
 
-    def test_is_token_expiring_soon_default_threshold(
-        self, token_cache: TokenCache, token_file: Path
-    ) -> None:
+    def test_is_token_expiring_soon_default_threshold(self, token_cache: TokenCache, token_file: Path) -> None:
         """Test checking if token is expiring soon with default threshold."""
         # Token expires in 2 minutes (less than 5 minute default)
         expires_soon_data = {
@@ -241,9 +222,7 @@ class TestTokenCache:
 
         assert token_cache.is_token_expiring_soon()
 
-    def test_is_token_expiring_soon_custom_threshold(
-        self, token_cache: TokenCache, token_file: Path
-    ) -> None:
+    def test_is_token_expiring_soon_custom_threshold(self, token_cache: TokenCache, token_file: Path) -> None:
         """Test checking if token is expiring soon with custom threshold."""
         # Token expires in 10 minutes
         expires_data = {
@@ -283,9 +262,7 @@ class TestGraphAuthenticator:
         return cache
 
     @pytest.fixture
-    def authenticator(
-        self, azure_settings: AzureSettings, mock_token_cache: Mock
-    ) -> GraphAuthenticator:
+    def authenticator(self, azure_settings: AzureSettings, mock_token_cache: Mock) -> GraphAuthenticator:
         """Create GraphAuthenticator instance."""
         return GraphAuthenticator(
             client_id=azure_settings.client_id,
@@ -308,9 +285,7 @@ class TestGraphAuthenticator:
         assert "https://graph.microsoft.com/User.Read" in auth.scopes
         assert "offline_access" in auth.scopes
 
-    def test_from_settings(
-        self, azure_settings: AzureSettings, mock_token_cache: Mock
-    ) -> None:
+    def test_from_settings(self, azure_settings: AzureSettings, mock_token_cache: Mock) -> None:
         """Test creating authenticator from settings."""
         auth = GraphAuthenticator.from_settings(azure_settings, mock_token_cache)
         assert auth.client_id == azure_settings.client_id
@@ -318,11 +293,9 @@ class TestGraphAuthenticator:
         assert auth.scopes == azure_settings.scopes
 
     @patch("src.auth.authenticator.DeviceCodeCredential")
-    def test_create_credential(
-        self, mock_device_code: Mock, authenticator: GraphAuthenticator
-    ) -> None:
+    def test_create_credential(self, mock_device_code: Mock, authenticator: GraphAuthenticator) -> None:
         """Test creating device code credential."""
-        credential = authenticator._create_credential()
+        authenticator._create_credential()
 
         mock_device_code.assert_called_once_with(
             client_id="test-client-id",
@@ -348,9 +321,7 @@ class TestGraphAuthenticator:
         """Test successful authentication."""
         # Setup mocks
         mock_credential = Mock()
-        mock_credential.get_token = AsyncMock(
-            return_value=Mock(token="test_token", expires_on=123456)
-        )
+        mock_credential.get_token = AsyncMock(return_value=Mock(token="test_token", expires_on=123456))
         mock_device_code.return_value = mock_credential
 
         mock_user = Mock()
@@ -381,9 +352,7 @@ class TestGraphAuthenticator:
         authenticator.token_cache.has_valid_token.return_value = True
 
         mock_credential = Mock()
-        mock_credential.get_token = AsyncMock(
-            return_value=Mock(token="cached_token", expires_on=123456)
-        )
+        mock_credential.get_token = AsyncMock(return_value=Mock(token="cached_token", expires_on=123456))
         mock_device_code.return_value = mock_credential
 
         mock_user = Mock()
@@ -423,16 +392,12 @@ class TestGraphAuthenticator:
         auth = GraphAuthenticator(client_id="test-id", token_cache=None)
         assert not auth.is_authenticated()
 
-    def test_is_authenticated_with_valid_token(
-        self, authenticator: GraphAuthenticator
-    ) -> None:
+    def test_is_authenticated_with_valid_token(self, authenticator: GraphAuthenticator) -> None:
         """Test is_authenticated with valid token."""
         authenticator.token_cache.has_valid_token.return_value = True
         assert authenticator.is_authenticated()
 
-    def test_is_authenticated_with_invalid_token(
-        self, authenticator: GraphAuthenticator
-    ) -> None:
+    def test_is_authenticated_with_invalid_token(self, authenticator: GraphAuthenticator) -> None:
         """Test is_authenticated with invalid token."""
         authenticator.token_cache.has_valid_token.return_value = False
         assert not authenticator.is_authenticated()
@@ -448,9 +413,7 @@ class TestGraphAuthenticator:
     ) -> None:
         """Test get_client when not authenticated."""
         mock_credential = Mock()
-        mock_credential.get_token = AsyncMock(
-            return_value=Mock(token="token", expires_on=123456)
-        )
+        mock_credential.get_token = AsyncMock(return_value=Mock(token="token", expires_on=123456))
         mock_device_code.return_value = mock_credential
 
         mock_user = Mock()
@@ -465,9 +428,7 @@ class TestGraphAuthenticator:
         assert client == mock_client_instance
 
     @pytest.mark.asyncio
-    async def test_get_client_already_authenticated(
-        self, authenticator: GraphAuthenticator
-    ) -> None:
+    async def test_get_client_already_authenticated(self, authenticator: GraphAuthenticator) -> None:
         """Test get_client when already authenticated."""
         mock_client = Mock()
         authenticator._client = mock_client
@@ -478,27 +439,19 @@ class TestGraphAuthenticator:
 
     @pytest.mark.asyncio
     @patch("src.auth.authenticator.DeviceCodeCredential")
-    async def test_refresh_token(
-        self, mock_device_code: Mock, authenticator: GraphAuthenticator
-    ) -> None:
+    async def test_refresh_token(self, mock_device_code: Mock, authenticator: GraphAuthenticator) -> None:
         """Test token refresh."""
         mock_credential = Mock()
-        mock_credential.get_token = AsyncMock(
-            return_value=Mock(token="new_token", expires_on=789012)
-        )
+        mock_credential.get_token = AsyncMock(return_value=Mock(token="new_token", expires_on=789012))
         mock_device_code.return_value = mock_credential
 
         await authenticator.refresh_token()
 
-        authenticator.token_cache.save_token.assert_called_once_with(
-            "new_token", 789012, authenticator.scopes
-        )
+        authenticator.token_cache.save_token.assert_called_once_with("new_token", 789012, authenticator.scopes)
 
     @pytest.mark.asyncio
     @patch("src.auth.authenticator.DeviceCodeCredential")
-    async def test_refresh_token_failure(
-        self, mock_device_code: Mock, authenticator: GraphAuthenticator
-    ) -> None:
+    async def test_refresh_token_failure(self, mock_device_code: Mock, authenticator: GraphAuthenticator) -> None:
         """Test token refresh failure."""
         mock_credential = Mock()
         mock_credential.get_token = AsyncMock(side_effect=Exception("Refresh failed"))

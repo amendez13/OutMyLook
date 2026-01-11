@@ -1,21 +1,12 @@
 """Tests for configuration module."""
 
 import logging
-import os
 from pathlib import Path
-from unittest.mock import mock_open, patch
 
 import pytest
 import yaml
 
-from src.config.settings import (
-    AzureSettings,
-    DatabaseSettings,
-    LoggingSettings,
-    Settings,
-    StorageSettings,
-    get_settings,
-)
+from src.config.settings import AzureSettings, DatabaseSettings, LoggingSettings, Settings, StorageSettings, get_settings
 
 
 class TestAzureSettings:
@@ -230,9 +221,7 @@ class TestSettings:
                 attachments_dir=str(tmp_path / "attachments"),
                 token_file=str(tmp_path / "tokens" / "tokens.json"),
             ),
-            database=DatabaseSettings(
-                url=f"sqlite:///{tmp_path}/db/emails.db"
-            ),
+            database=DatabaseSettings(url=f"sqlite:///{tmp_path}/db/emails.db"),
         )
 
         settings.ensure_directories()
