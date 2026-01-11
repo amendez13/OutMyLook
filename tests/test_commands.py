@@ -2,9 +2,12 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+import typer
 from rich.panel import Panel
 
 import src.cli.commands as commands
+from src.auth import AuthenticationError
 
 
 def make_settings(token_file: str = "token.json") -> MagicMock:
@@ -102,4 +105,164 @@ def test_logout_clears_token_when_present() -> None:
         mock_token_cache.clear.assert_awaited()
 
         # console.print should report successful logout
+        mock_console.print.assert_called()
+
+
+def test_login_already_authenticated_no_reauth() -> None:
+    """If already authenticated and user declines re-auth, login() returns early."""
+    mock_token_cache = MagicMock()
+    mock_token_cache.has_valid_token.return_value = True
+    mock_token_cache.get_token_info = AsyncMock(
+        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.Read"]}
+    )
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.typer.confirm", return_value=False),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        commands.login()
+        # token_cache.clear should not be called since re-auth was declined
+        assert not getattr(mock_token_cache, "clear", MagicMock()).called
+        mock_console.print.assert_called()
+
+
+def test_login_already_authenticated_reauth_and_success() -> None:
+    """If user opts to re-authenticate, token is cleared and auth proceeds successfully."""
+    mock_token_cache = MagicMock()
+    mock_token_cache.has_valid_token.return_value = True
+    mock_token_cache.get_token_info = AsyncMock(
+        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.Read"]}
+    )
+    mock_token_cache.clear = AsyncMock()
+
+    # Fake authenticator that returns a fake client with user info
+    fake_client = MagicMock()
+    fake_user = MagicMock()
+    fake_user.display_name = "Test User"
+    fake_user.user_principal_name = "test@example.com"
+    fake_client.me.get = AsyncMock(return_value=fake_user)
+
+    fake_authenticator = MagicMock()
+    fake_authenticator.authenticate = AsyncMock(return_value=fake_client)
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.typer.confirm", return_value=True),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+        commands.login()
+
+        mock_token_cache.clear.assert_awaited()
+        mock_console.print.assert_called()
+
+
+def test_login_authentication_error_exits() -> None:
+    """If authenticator raises AuthenticationError, login exits with an error."""
+    mock_token_cache = MagicMock()
+    mock_token_cache.has_valid_token.return_value = False
+
+    fake_authenticator = MagicMock()
+    fake_authenticator.authenticate = AsyncMock(side_effect=AuthenticationError("bad auth"))
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+        with pytest.raises(typer.Exit):
+            commands.login()
+        mock_console.print.assert_called()
+
+
+def test_login_unexpected_error_exits() -> None:
+    """If get_settings raises, login should handle and exit."""
+    with (
+        patch("src.cli.commands.get_settings", side_effect=Exception("boom")),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        with pytest.raises(typer.Exit):
+            commands.login()
+        mock_console.print.assert_called()
+
+
+def test_status_token_info_unavailable() -> None:
+    """When token exists but token info is None, should print 'Token information unavailable'."""
+    mock_token_cache = MagicMock()
+    mock_token_cache.has_valid_token.return_value = True
+    mock_token_cache.get_token_info = AsyncMock(return_value=None)
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        commands.status()
+        last_call = mock_console.print.call_args_list[-1][0]
+        arg = last_call[0] if last_call else None
+        # Panel with title "Authentication Status" is used for this case
+        assert getattr(arg, "title", None) == "Authentication Status"
+
+
+def test_status_expiring_soon_shows_note() -> None:
+    """When token is expiring soon, status should include a note about refresh."""
+    mock_token_cache = MagicMock()
+    mock_token_cache.has_valid_token.return_value = True
+    mock_token_cache.get_token_info = AsyncMock(
+        return_value={
+            "expires_at": "2026-01-01T00:00:00+00:00",
+            "seconds_until_expiry": 10,
+            "scopes": ["Mail.Read"],
+            "cached_at": "2026-01-01T00:00:00+00:00",
+        }
+    )
+    mock_token_cache.is_token_expiring_soon.return_value = True
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        commands.status()
+        # The note about token refresh is printed after the main panel
+        assert mock_console.print.call_count >= 2
+
+
+def test_logout_clear_raises_exit() -> None:
+    """If clearing token fails during logout, logout should exit with an error."""
+    mock_token_cache = MagicMock()
+    mock_token_cache.has_valid_token.return_value = True
+    mock_token_cache.clear = AsyncMock(side_effect=Exception("boom"))
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        with pytest.raises(typer.Exit):
+            commands.logout()
+        mock_console.print.assert_called()
+
+
+def test_main_calls_app() -> None:
+    """main() should call the Typer app."""
+    with patch("src.cli.commands.app") as mock_app:
+        commands.main()
+        mock_app.assert_called_once()
+
+
+def test_status_unexpected_error_exits() -> None:
+    """If get_settings raises in status, it should handle and exit."""
+    with (
+        patch("src.cli.commands.get_settings", side_effect=Exception("boom")),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        with pytest.raises(typer.Exit):
+            commands.status()
         mock_console.print.assert_called()
