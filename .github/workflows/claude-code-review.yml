@@ -24,7 +24,7 @@ jobs:
   claude-review:
     # Only allow your-username to trigger on comments with "/claude-review"
     if: |
-      github.actor == 'your-username' && (
+      github.actor == 'amendez13' && (
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/claude-review'))
       )
