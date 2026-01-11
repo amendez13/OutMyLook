@@ -41,9 +41,7 @@ class TokenCache:
         """Ensure the directory for token file exists."""
         self.token_file.parent.mkdir(parents=True, exist_ok=True)
 
-    async def save_token(
-        self, access_token: str, expires_on: int, scopes: list[str]
-    ) -> None:
+    async def save_token(self, access_token: str, expires_on: int, scopes: list[str]) -> None:
         """Save token to cache file.
 
         Args:
@@ -108,7 +106,8 @@ class TokenCache:
             Token data dictionary
         """
         with open(self.token_file, "r") as f:
-            return json.load(f)
+            data: dict[str, Any] = json.load(f)
+            return data
 
     def has_valid_token(self) -> bool:
         """Check if a valid (non-expired) token exists in cache.
@@ -217,7 +216,8 @@ class TokenCache:
             expires_on = token_data.get("expires_on", 0)
             current_time = datetime.now(timezone.utc).timestamp()
 
-            return current_time >= (expires_on - threshold_seconds)
+            is_expiring: bool = current_time >= (expires_on - threshold_seconds)
+            return is_expiring
 
         except Exception:
             return True

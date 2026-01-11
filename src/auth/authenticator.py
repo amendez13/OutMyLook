@@ -58,15 +58,10 @@ class GraphAuthenticator:
         self._credential: Optional[DeviceCodeCredential] = None
         self._client: Optional[GraphServiceClient] = None
 
-        logger.debug(
-            f"Initialized GraphAuthenticator with client_id={client_id}, "
-            f"tenant={tenant}, scopes={self.scopes}"
-        )
+        logger.debug(f"Initialized GraphAuthenticator with client_id={client_id}, " f"tenant={tenant}, scopes={self.scopes}")
 
     @classmethod
-    def from_settings(
-        cls, azure_settings: AzureSettings, token_cache: Optional[TokenCache] = None
-    ) -> "GraphAuthenticator":
+    def from_settings(cls, azure_settings: AzureSettings, token_cache: Optional[TokenCache] = None) -> "GraphAuthenticator":
         """Create authenticator from Azure settings.
 
         Args:
@@ -130,26 +125,20 @@ class GraphAuthenticator:
                 self._credential = self._create_credential()
 
             # Create Graph client with the credential
-            self._client = GraphServiceClient(
-                credentials=self._credential, scopes=self.scopes
-            )
+            self._client = GraphServiceClient(credentials=self._credential, scopes=self.scopes)
 
             # Test authentication by getting user info
             logger.debug("Testing authentication by fetching user info")
             user = await self._client.me.get()
 
             if user and user.user_principal_name:
-                logger.info(
-                    f"Successfully authenticated as {user.user_principal_name}"
-                )
+                logger.info(f"Successfully authenticated as {user.user_principal_name}")
 
                 # Cache the token for future use
                 if self.token_cache:
                     # Get a token to cache
                     token = await self._credential.get_token(*self.scopes)
-                    await self.token_cache.save_token(
-                        token.token, token.expires_on, self.scopes
-                    )
+                    await self.token_cache.save_token(token.token, token.expires_on, self.scopes)
                     logger.debug("Token cached successfully")
             else:
                 raise AuthenticationError("Failed to retrieve user information")
@@ -204,9 +193,7 @@ class GraphAuthenticator:
 
             # Update cache
             if self.token_cache:
-                await self.token_cache.save_token(
-                    token.token, token.expires_on, self.scopes
-                )
+                await self.token_cache.save_token(token.token, token.expires_on, self.scopes)
                 logger.info("Token refreshed successfully")
             else:
                 logger.warning("Token refreshed but no cache available to save it")
