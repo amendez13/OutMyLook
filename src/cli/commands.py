@@ -17,7 +17,7 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 
-@app.command()  # type: ignore[misc]
+@app.command()
 def login(
     config_file: Optional[str] = typer.Option(None, "--config", "-c", help="Path to configuration file"),
 ) -> None:
@@ -133,7 +133,7 @@ async def _login_async(config_file: Optional[str]) -> None:
         raise typer.Exit(code=1)
 
 
-@app.command()  # type: ignore[misc]
+@app.command()
 def logout() -> None:
     """Logout and clear cached authentication tokens."""
     asyncio.run(_logout_async())
@@ -172,7 +172,7 @@ async def _logout_async() -> None:
         raise typer.Exit(code=1)
 
 
-@app.command()  # type: ignore[misc]
+@app.command()
 def status() -> None:
     """Check authentication status and token information."""
     asyncio.run(_status_async())
