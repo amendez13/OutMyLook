@@ -131,13 +131,11 @@ class CachedTokenCredential(TokenCredential):
             return
 
         try:
-            # Try to run save_token on the event loop. If the current loop
-            # is already running, asyncio.get_event_loop().run_until_complete
-            # will raise a RuntimeError, so fall back to asyncio.run.
+            # Try to run save_token on the event loop. If run_until_complete
+            # raises a RuntimeError (e.g., when the loop is already running),
+            # fall back to asyncio.run.
             try:
                 loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    raise RuntimeError
                 loop.run_until_complete(self._token_cache.save_token(token.token, token.expires_on, scopes))
             except RuntimeError:
                 asyncio.run(self._token_cache.save_token(token.token, token.expires_on, scopes))
