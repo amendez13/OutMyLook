@@ -292,15 +292,16 @@ class TestGraphAuthenticator:
         assert auth.tenant == azure_settings.tenant
         assert auth.scopes == azure_settings.scopes
 
-    @patch("src.auth.authenticator.DeviceCodeCredential")
-    def test_create_credential(self, mock_device_code: Mock, authenticator: GraphAuthenticator) -> None:
-        """Test creating device code credential."""
-        _credential = authenticator._create_credential()  # noqa: F841
+    def test_create_credential(self, authenticator: GraphAuthenticator) -> None:
+        """Test creating CachedTokenCredential."""
+        from src.auth.authenticator import CachedTokenCredential
 
-        mock_device_code.assert_called_once_with(
-            client_id="test-client-id",
-            tenant_id="common",
-        )
+        credential = authenticator._create_credential()
+
+        assert isinstance(credential, CachedTokenCredential)
+        assert credential._client_id == "test-client-id"
+        assert credential._tenant_id == "common"
+        assert credential._token_cache == authenticator.token_cache
 
     def test_create_credential_no_client_id(self) -> None:
         """Test creating credential without client_id raises error."""
@@ -311,20 +312,13 @@ class TestGraphAuthenticator:
 
     @pytest.mark.asyncio
     @patch("src.auth.authenticator.GraphServiceClient")
-    @patch("src.auth.authenticator.DeviceCodeCredential")
     async def test_authenticate_success(
         self,
-        mock_device_code: Mock,
         mock_graph_client: Mock,
         authenticator: GraphAuthenticator,
     ) -> None:
         """Test successful authentication."""
         # Setup mocks
-        mock_credential = Mock()
-        # get_token is synchronous in azure-identity
-        mock_credential.get_token = Mock(return_value=Mock(token="test_token", expires_on=123456))
-        mock_device_code.return_value = mock_credential
-
         mock_user = Mock()
         mock_user.user_principal_name = "test@example.com"
         mock_user.display_name = "Test User"
@@ -333,29 +327,30 @@ class TestGraphAuthenticator:
         mock_client_instance.me.get = AsyncMock(return_value=mock_user)
         mock_graph_client.return_value = mock_client_instance
 
-        # Authenticate
-        client = await authenticator.authenticate()
+        # Mock the credential's get_token to avoid actual device code flow
+        with patch.object(authenticator, "_create_credential") as mock_create:
+            mock_credential = Mock()
+            mock_credential.get_token = Mock(return_value=Mock(token="test_token", expires_on=123456))
+            mock_create.return_value = mock_credential
 
-        assert client == mock_client_instance
-        authenticator.token_cache.save_token.assert_called_once()
+            # Authenticate
+            client = await authenticator.authenticate()
+
+            assert client == mock_client_instance
+            # Credential is created and used
+            mock_create.assert_called_once()
 
     @pytest.mark.asyncio
     @patch("src.auth.authenticator.GraphServiceClient")
-    @patch("src.auth.authenticator.DeviceCodeCredential")
     async def test_authenticate_cached_token(
         self,
-        mock_device_code: Mock,
         mock_graph_client: Mock,
         authenticator: GraphAuthenticator,
     ) -> None:
-        """Test authentication with valid cached token."""
+        """Test authentication with valid cached token uses cache instead of device flow."""
         # Setup token cache to return valid token
         authenticator.token_cache.has_valid_token.return_value = True
-
-        mock_credential = Mock()
-        # get_token is synchronous in azure-identity
-        mock_credential.get_token = Mock(return_value=Mock(token="cached_token", expires_on=123456))
-        mock_device_code.return_value = mock_credential
+        authenticator.token_cache._read_token_file = Mock(return_value={"access_token": "cached_token", "expires_on": 123456})
 
         mock_user = Mock()
         mock_user.user_principal_name = "test@example.com"
@@ -364,30 +359,33 @@ class TestGraphAuthenticator:
         mock_client_instance.me.get = AsyncMock(return_value=mock_user)
         mock_graph_client.return_value = mock_client_instance
 
-        # Authenticate
-        await authenticator.authenticate()
+        # Authenticate - CachedTokenCredential will use the cached token
+        client = await authenticator.authenticate()
 
-        # Should still create credential and client
-        assert mock_device_code.called
+        # Should return the client
+        assert client == mock_client_instance
+        # Credential should be created (CachedTokenCredential)
+        assert authenticator._credential is not None
 
     @pytest.mark.asyncio
     @patch("src.auth.authenticator.GraphServiceClient")
-    @patch("src.auth.authenticator.DeviceCodeCredential")
     async def test_authenticate_failure(
         self,
-        mock_device_code: Mock,
         mock_graph_client: Mock,
         authenticator: GraphAuthenticator,
     ) -> None:
         """Test authentication failure."""
-        mock_device_code.return_value = Mock()
-
         mock_client_instance = Mock()
         mock_client_instance.me.get = AsyncMock(side_effect=Exception("API Error"))
         mock_graph_client.return_value = mock_client_instance
 
-        with pytest.raises(AuthenticationError, match="Authentication failed"):
-            await authenticator.authenticate()
+        # Mock the credential to avoid device code flow
+        with patch.object(authenticator, "_create_credential") as mock_create:
+            mock_credential = Mock()
+            mock_create.return_value = mock_credential
+
+            with pytest.raises(AuthenticationError, match="Authentication failed"):
+                await authenticator.authenticate()
 
     def test_is_authenticated_no_cache(self) -> None:
         """Test is_authenticated without token cache."""
@@ -406,19 +404,12 @@ class TestGraphAuthenticator:
 
     @pytest.mark.asyncio
     @patch("src.auth.authenticator.GraphServiceClient")
-    @patch("src.auth.authenticator.DeviceCodeCredential")
     async def test_get_client_not_authenticated(
         self,
-        mock_device_code: Mock,
         mock_graph_client: Mock,
         authenticator: GraphAuthenticator,
     ) -> None:
         """Test get_client when not authenticated."""
-        mock_credential = Mock()
-        # get_token is synchronous in azure-identity
-        mock_credential.get_token = Mock(return_value=Mock(token="token", expires_on=123456))
-        mock_device_code.return_value = mock_credential
-
         mock_user = Mock()
         mock_user.user_principal_name = "test@example.com"
 
@@ -426,9 +417,15 @@ class TestGraphAuthenticator:
         mock_client_instance.me.get = AsyncMock(return_value=mock_user)
         mock_graph_client.return_value = mock_client_instance
 
-        client = await authenticator.get_client()
+        # Mock the credential to avoid device code flow
+        with patch.object(authenticator, "_create_credential") as mock_create:
+            mock_credential = Mock()
+            mock_credential.get_token = Mock(return_value=Mock(token="token", expires_on=123456))
+            mock_create.return_value = mock_credential
 
-        assert client == mock_client_instance
+            client = await authenticator.get_client()
+
+            assert client == mock_client_instance
 
     @pytest.mark.asyncio
     async def test_get_client_already_authenticated(self, authenticator: GraphAuthenticator) -> None:
@@ -441,29 +438,34 @@ class TestGraphAuthenticator:
         assert client == mock_client
 
     @pytest.mark.asyncio
-    @patch("src.auth.authenticator.DeviceCodeCredential")
-    async def test_refresh_token(self, mock_device_code: Mock, authenticator: GraphAuthenticator) -> None:
-        """Test token refresh."""
-        mock_credential = Mock()
-        # get_token is synchronous in azure-identity
-        mock_credential.get_token = Mock(return_value=Mock(token="new_token", expires_on=789012))
-        mock_device_code.return_value = mock_credential
+    async def test_refresh_token(self, authenticator: GraphAuthenticator) -> None:
+        """Test token refresh clears cache and gets new token."""
+        # Mock the credential to avoid device code flow
+        with patch.object(authenticator, "_create_credential") as mock_create:
+            mock_credential = Mock()
+            mock_credential.get_token = Mock(return_value=Mock(token="new_token", expires_on=789012))
+            mock_create.return_value = mock_credential
 
-        await authenticator.refresh_token()
+            await authenticator.refresh_token()
 
-        authenticator.token_cache.save_token.assert_called_once_with("new_token", 789012, authenticator.scopes)
+            # Cache should be cleared first
+            authenticator.token_cache.clear.assert_called_once()
+            # New credential should be created
+            mock_create.assert_called_once()
+            # get_token should be called to get fresh token
+            mock_credential.get_token.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("src.auth.authenticator.DeviceCodeCredential")
-    async def test_refresh_token_failure(self, mock_device_code: Mock, authenticator: GraphAuthenticator) -> None:
+    async def test_refresh_token_failure(self, authenticator: GraphAuthenticator) -> None:
         """Test token refresh failure."""
-        mock_credential = Mock()
-        # get_token is synchronous in azure-identity
-        mock_credential.get_token = Mock(side_effect=Exception("Refresh failed"))
-        mock_device_code.return_value = mock_credential
+        # Mock the credential to simulate failure
+        with patch.object(authenticator, "_create_credential") as mock_create:
+            mock_credential = Mock()
+            mock_credential.get_token = Mock(side_effect=Exception("Refresh failed"))
+            mock_create.return_value = mock_credential
 
-        with pytest.raises(AuthenticationError, match="Token refresh failed"):
-            await authenticator.refresh_token()
+            with pytest.raises(AuthenticationError, match="Token refresh failed"):
+                await authenticator.refresh_token()
 
     @pytest.mark.asyncio
     async def test_logout(self, authenticator: GraphAuthenticator) -> None:
