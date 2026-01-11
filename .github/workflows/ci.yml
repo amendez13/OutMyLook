@@ -44,7 +44,8 @@ jobs:
 
     - name: Type checking with mypy
       run: |
-        mypy src/ --ignore-missing-imports --strict --explicit-package-bases
+        # Uses settings from pyproject.toml [tool.mypy]
+        mypy src/ --explicit-package-bases
 
   test:
     name: Test Python ${{ matrix.python-version }}
