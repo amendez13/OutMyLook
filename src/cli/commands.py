@@ -17,11 +17,9 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 
-@app.command()
+@app.command()  # type: ignore[misc]
 def login(
-    config_file: Optional[str] = typer.Option(
-        None, "--config", "-c", help="Path to configuration file"
-    ),
+    config_file: Optional[str] = typer.Option(None, "--config", "-c", help="Path to configuration file"),
 ) -> None:
     """Authenticate with Microsoft Graph using Device Code Flow.
 
@@ -51,15 +49,16 @@ async def _login_async(config_file: Optional[str]) -> None:
 
         if token_cache.has_valid_token():
             token_info = await token_cache.get_token_info()
-            console.print(
-                Panel.fit(
-                    f"✓ Already authenticated!\n\n"
-                    f"Token expires: {token_info['expires_at']}\n"
-                    f"Scopes: {', '.join(token_info['scopes'])}",
-                    title="Authentication Status",
-                    border_style="green",
+            if token_info:
+                console.print(
+                    Panel.fit(
+                        f"✓ Already authenticated!\n\n"
+                        f"Token expires: {token_info['expires_at']}\n"
+                        f"Scopes: {', '.join(token_info['scopes'])}",
+                        title="Authentication Status",
+                        border_style="green",
+                    )
                 )
-            )
 
             if not typer.confirm("Do you want to re-authenticate?", default=False):
                 return
@@ -69,9 +68,7 @@ async def _login_async(config_file: Optional[str]) -> None:
             console.print("[yellow]Cleared existing token[/yellow]\n")
 
         # Create authenticator
-        authenticator = GraphAuthenticator.from_settings(
-            settings.azure, token_cache=token_cache
-        )
+        authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
 
         # Display authentication instructions
         console.print(
@@ -101,11 +98,13 @@ async def _login_async(config_file: Optional[str]) -> None:
                 user = await client.me.get()
 
                 console.print()
+                display_name = user.display_name if user else "Unknown"
+                email = user.user_principal_name if user else "Unknown"
                 console.print(
                     Panel.fit(
                         f"✓ Authentication successful!\n\n"
-                        f"Logged in as: {user.display_name}\n"
-                        f"Email: {user.user_principal_name}\n\n"
+                        f"Logged in as: {display_name}\n"
+                        f"Email: {email}\n\n"
                         f"Token cached to: {settings.storage.token_file}",
                         title="Success",
                         border_style="green",
@@ -134,7 +133,7 @@ async def _login_async(config_file: Optional[str]) -> None:
         raise typer.Exit(code=1)
 
 
-@app.command()
+@app.command()  # type: ignore[misc]
 def logout() -> None:
     """Logout and clear cached authentication tokens."""
     asyncio.run(_logout_async())
@@ -169,15 +168,11 @@ async def _logout_async() -> None:
 
     except Exception as e:
         logger.exception("Logout failed")
-        console.print(
-            Panel.fit(
-                f"✗ Error during logout\n\n{str(e)}", title="Error", border_style="red"
-            )
-        )
+        console.print(Panel.fit(f"✗ Error during logout\n\n{str(e)}", title="Error", border_style="red"))
         raise typer.Exit(code=1)
 
 
-@app.command()
+@app.command()  # type: ignore[misc]
 def status() -> None:
     """Check authentication status and token information."""
     asyncio.run(_status_async())
@@ -192,8 +187,7 @@ async def _status_async() -> None:
         if not token_cache.has_valid_token():
             console.print(
                 Panel.fit(
-                    "✗ Not authenticated\n\n"
-                    "Run 'outmylook login' to authenticate with Microsoft Graph.",
+                    "✗ Not authenticated\n\n" "Run 'outmylook login' to authenticate with Microsoft Graph.",
                     title="Authentication Status",
                     border_style="red",
                 )
@@ -221,8 +215,7 @@ async def _status_async() -> None:
 
             if expiring_soon:
                 console.print(
-                    "\n[yellow]Note: Token is expiring soon. "
-                    "It will be refreshed automatically on next use.[/yellow]"
+                    "\n[yellow]Note: Token is expiring soon. " "It will be refreshed automatically on next use.[/yellow]"
                 )
         else:
             console.print(
