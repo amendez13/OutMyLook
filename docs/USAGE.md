@@ -1,0 +1,98 @@
+# Usage Guide
+
+This guide explains how to run OutMyLook from the command line and what to expect
+from each command.
+
+## Quick Start
+
+1. Configure your Azure application in `config/config.yaml` (see `docs/SETUP.md`).
+2. Authenticate with Microsoft Graph.
+3. Fetch emails from a folder.
+
+```bash
+python -m src.main login
+python -m src.main fetch --folder inbox --limit 10
+```
+
+## Authentication Commands
+
+### Login
+
+```bash
+python -m src.main login
+```
+
+What happens:
+- The CLI prints a URL and a device code.
+- Open the URL in a browser and enter the code.
+- A token is cached locally for future use.
+
+Tokens are stored at the path configured in `storage.token_file` (default:
+`~/.outmylook/tokens.json`). The cache is used for subsequent commands and
+refreshed automatically before expiry.
+
+### Status
+
+```bash
+python -m src.main status
+```
+
+Shows the current token status, remaining lifetime, and granted scopes. If the
+token is close to expiring, the CLI warns that it will refresh on the next use.
+
+### Logout
+
+```bash
+python -m src.main logout
+```
+
+Clears the cached token so the next command will require re-authentication.
+
+## Fetching Email
+
+### Fetch from a folder
+
+```bash
+python -m src.main fetch --folder inbox --limit 25 --skip 0
+```
+
+Options:
+- `--folder`: Folder name or Graph folder ID (default: `inbox`).
+- `--limit`: Number of messages to fetch (default: `25`).
+- `--skip`: Offset for pagination (default: `0`).
+
+The command prints a table with received time, sender, subject, read status,
+and attachment presence. Empty folders are handled gracefully.
+
+### Folder selection
+
+The following well-known folders are recognized (case-insensitive):
+- `inbox`
+- `sent` / `sentitems`
+- `drafts`
+- `archive`
+- `deleted` / `deleteditems`
+- `junk` / `junkemail`
+- `outbox`
+
+If the value does not match a well-known name, the CLI attempts to resolve it
+by display name. If no match is found, it is treated as a Graph folder ID.
+
+## Configuration Notes
+
+Configuration is read from `config/config.yaml` if present. You can also set
+`OUTMYLOOK_CONFIG` to point at a custom config file.
+
+Required values:
+- `azure.client_id`: The Azure application (client) ID.
+
+Optional values:
+- `azure.tenant`: Use `common` for personal accounts, or your tenant ID.
+- `azure.scopes`: Graph API scopes (defaults are set in `config/config.example.yaml`).
+- `storage.token_file`: Token cache path.
+
+## Troubleshooting
+
+- **Not authenticated**: Run `python -m src.main login`.
+- **Invalid client_id**: Verify `azure.client_id` in `config/config.yaml`.
+- **No emails returned**: Try a different folder or reduce `--skip`.

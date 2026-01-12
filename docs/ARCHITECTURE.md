@@ -15,12 +15,18 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 │     CLI      │────▶│  Authentication  │────▶│   Graph     │
 │  (Typer)     │     │    (OAuth2)      │     │     API     │
 └──────────────┘     └──────────────────┘     └─────────────┘
-       │                      │                        │
-       ▼                      ▼                        ▼
-┌──────────────┐     ┌──────────────────┐     ┌─────────────┐
-│    Email     │     │  Token Cache     │     │  Database   │
-│   Manager    │     │   (Encrypted)    │     │  (SQLite)   │
-└──────────────┘     └──────────────────┘     └─────────────┘
+       │                      │
+       ▼                      ▼
+┌──────────────┐     ┌──────────────────┐
+│ Email Client │     │   Token Cache    │
+│ + Models     │     │   (Local JSON)   │
+└──────────────┘     └──────────────────┘
+       │
+       ▼
+┌──────────────┐
+│  Database    │
+│  (SQLite)    │
+└──────────────┘
 ```
 
 ### Authentication Module
@@ -47,7 +53,7 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
    - `logout()` - Clears cached tokens
 
 2. **TokenCache**
-   - `save_token()` - Saves tokens to encrypted file
+   - `save_token()` - Saves tokens to a local JSON file
    - `load_token()` - Loads tokens from cache
    - `has_valid_token()` - Validates token expiration
    - `clear()` - Removes cached tokens
@@ -57,18 +63,45 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 **Purpose**: Provides command-line interface for user interactions
 
 **Responsibilities**:
-- Handle user commands (login, logout, status)
+- Handle user commands (login, logout, status, fetch)
 - Display authentication status and messages
 - Provide interactive prompts and feedback
+- Render fetched email data in a readable format
 
 **Key Files**:
 - `src/cli/commands.py` - CLI commands using Typer
 - `src/cli/__init__.py` - Module exports
+- `src/main.py` - Main entry point that invokes the CLI
 
 **Commands**:
 - `login` - Authenticate with Microsoft Graph
 - `logout` - Clear authentication tokens
 - `status` - Check authentication status
+- `fetch` - Fetch emails from a mail folder
+
+### Email Module
+
+**Purpose**: Wrap Microsoft Graph SDK calls and map message data to typed models.
+
+**Responsibilities**:
+- Resolve folder names or IDs to a Graph folder identifier
+- Fetch message lists with pagination
+- Map Graph SDK message payloads to Pydantic models
+
+**Key Files**:
+- `src/email/client.py` - EmailClient wrapper around GraphServiceClient
+- `src/email/models.py` - Pydantic models for email and folder data
+
+**Key Classes**:
+
+1. **EmailClient**
+   - `list_emails()` - Fetch messages for a folder with `limit` and `skip`
+   - `get_email()` - Fetch a single message by ID
+   - `list_folders()` - Fetch available mail folders
+
+2. **Email / EmailAddress / MailFolder**
+   - Normalize Graph fields (e.g., `receivedDateTime`, `bodyPreview`)
+   - Validate required values and provide consistent typing
 
 ### Configuration Module
 
@@ -87,17 +120,17 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 ### Authentication Flow
 
 1. **Initial Authentication** (Device Code Flow):
-   - User runs `outmylook login` command
+   - User runs `python -m src.main login`
    - GraphAuthenticator creates DeviceCodeCredential
    - Azure AD provides URL and device code
    - User visits URL and enters code in browser
    - User authenticates with Microsoft account
    - Azure AD returns access and refresh tokens
-   - TokenCache saves tokens to encrypted file (~/.outmylook/tokens.json)
+   - TokenCache saves tokens to a local JSON file (~/.outmylook/tokens.json)
    - GraphServiceClient is created with valid credentials
 
 2. **Subsequent Access** (Cached Token):
-   - User runs command requiring authentication
+   - User runs a command requiring authentication
    - TokenCache checks for valid cached token
    - If token exists and not expired, use cached token
    - If token expired, automatically refresh using refresh token
@@ -110,9 +143,28 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
    - Application continues without user intervention
 
 4. **Logout**:
-   - User runs `outmylook logout` command
+   - User runs `python -m src.main logout`
    - TokenCache clears cached tokens
    - User must re-authenticate on next use
+
+### Email Fetch Flow
+
+1. **Fetch Request**:
+   - User runs `python -m src.main fetch --folder inbox --limit 25 --skip 0`
+   - CLI validates authentication via TokenCache
+2. **Client Initialization**:
+   - GraphAuthenticator returns a GraphServiceClient instance
+   - EmailClient wraps the GraphServiceClient
+3. **Folder Resolution**:
+   - EmailClient resolves a well-known folder name or display name to a folder ID
+4. **Graph API Call**:
+   - EmailClient requests messages with `top` and `skip` parameters
+   - The request selects only needed fields (subject, sender, receivedDateTime, etc.)
+5. **Model Mapping**:
+   - Email models normalize Graph fields into typed data
+   - Invalid messages are skipped with a warning
+6. **CLI Output**:
+   - The CLI renders a table of received time, sender, subject, and flags
 
 ## Design Decisions
 
@@ -134,14 +186,14 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 
 **Context**: Requiring re-authentication on every command execution would severely degrade user experience. Need secure, persistent token storage.
 
-**Decision**: Store OAuth tokens in encrypted JSON file (~/.outmylook/tokens.json) with restrictive file permissions (600). Implement automatic token refresh before expiration.
+**Decision**: Store OAuth tokens in a local JSON file (~/.outmylook/tokens.json) with restrictive file permissions (600). Implement automatic token refresh before expiration.
 
 **Consequences**:
 - Pro: Users authenticate once, tokens persist across sessions
 - Pro: Automatic refresh eliminates re-authentication for expired tokens
 - Pro: File permissions (600) protect sensitive tokens
 - Pro: Simple JSON format, easy to inspect and debug
-- Con: Tokens stored on disk (encrypted but still a security consideration)
+- Con: Tokens stored on disk (restricted permissions but still a security consideration)
 - Con: Tokens not shared across machines (each machine needs separate auth)
 
 ### Decision 3: Async/Await for API Calls

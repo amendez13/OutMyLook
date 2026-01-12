@@ -7,6 +7,7 @@ Welcome to the OutMyLook documentation. This index provides easy access to all d
 **For Users:**
 - [Getting Started](#getting-started) - Start here if you're new
 - [Setup Guide](#setup-guides) - Configure your environment
+- [Usage Guide](#usage) - CLI usage and examples
 
 **For Developers:**
 - [Architecture](#architecture) - Technical design and implementation details
@@ -34,6 +35,15 @@ Welcome to the OutMyLook documentation. This index provides easy access to all d
 - Configuration options
 - Verification steps
 - Troubleshooting
+
+---
+
+## Usage
+
+**[USAGE.md](USAGE.md)**
+- Authentication flow (login, status, logout)
+- Fetching email with pagination and folder selection
+- Configuration notes and troubleshooting
 
 ---
 
