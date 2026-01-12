@@ -151,7 +151,7 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 
 1. **Fetch Request**:
    - User runs `python -m src.main fetch --folder inbox --limit 25 --skip 0`
-   - CLI validates authentication via TokenCache
+   - CLI asks GraphAuthenticator for a GraphServiceClient (refresh tokens are used if available)
 2. **Client Initialization**:
    - GraphAuthenticator returns a GraphServiceClient instance
    - EmailClient wraps the GraphServiceClient

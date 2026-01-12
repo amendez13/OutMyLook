@@ -257,16 +257,6 @@ async def _fetch_async(folder: str, limit: int, skip: int) -> None:
         settings.setup_logging()
 
         token_cache = TokenCache(settings.storage.token_file)
-        if not token_cache.has_valid_token():
-            console.print(
-                Panel.fit(
-                    "Not authenticated. Run 'outmylook login' first.",
-                    title="Authentication Required",
-                    border_style="red",
-                )
-            )
-            raise typer.Exit(code=1)
-
         authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
         graph_client = await authenticator.get_client()
 
@@ -288,8 +278,8 @@ async def _fetch_async(folder: str, limit: int, skip: int) -> None:
     except AuthenticationError as e:
         console.print(
             Panel.fit(
-                f"Authentication failed\n\n{str(e)}",
-                title="Error",
+                f"Authentication failed\n\n{str(e)}\n\nRun 'outmylook login' to authenticate.",
+                title="Authentication Required",
                 border_style="red",
             )
         )

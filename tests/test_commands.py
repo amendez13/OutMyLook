@@ -273,13 +273,17 @@ def test_status_unexpected_error_exits() -> None:
 def test_fetch_requires_authentication() -> None:
     """Fetch should exit when not authenticated."""
     mock_token_cache = MagicMock()
-    mock_token_cache.has_valid_token.return_value = False
+
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(side_effect=AuthenticationError("auth failed"))
 
     with (
         patch("src.cli.commands.get_settings", return_value=make_settings()),
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
         patch("src.cli.commands.console") as mock_console,
     ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
         with pytest.raises(typer.Exit):
             commands.fetch()
         mock_console.print.assert_called()
@@ -288,7 +292,6 @@ def test_fetch_requires_authentication() -> None:
 def test_fetch_success_renders_table() -> None:
     """Fetch should render a table when emails are returned."""
     mock_token_cache = MagicMock()
-    mock_token_cache.has_valid_token.return_value = True
 
     fake_client = MagicMock()
     fake_authenticator = MagicMock()
@@ -327,7 +330,6 @@ def test_fetch_success_renders_table() -> None:
 def test_fetch_empty_folder() -> None:
     """Fetch should handle empty folders gracefully."""
     mock_token_cache = MagicMock()
-    mock_token_cache.has_valid_token.return_value = True
 
     fake_client = MagicMock()
     fake_authenticator = MagicMock()
