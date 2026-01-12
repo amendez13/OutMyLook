@@ -58,13 +58,13 @@ First, authenticate with your Microsoft account:
 
 ```bash
 # Login with Device Code Flow
-python -m src.cli login
+python -m src.main login
 
 # Check authentication status
-python -m src.cli status
+python -m src.main status
 
 # Logout (clear cached tokens)
-python -m src.cli logout
+python -m src.main logout
 ```
 
 The login command will display a URL and device code. Visit the URL in your browser and enter the code to complete authentication. Your tokens will be cached securely for future use.
@@ -72,10 +72,11 @@ The login command will display a URL and device code. Visit the URL in your brow
 #### Email Management
 
 ```bash
-# Coming in future releases
-# python -m src.cli fetch    # Fetch emails
-# python -m src.cli search   # Search emails
+python -m src.main fetch --limit 10 --folder inbox  # Fetch emails
+# python -m src.main search   # Search emails
 ```
+
+See `docs/USAGE.md` for a full usage guide, including configuration tips, folder selection, and pagination.
 
 ## Configuration
 

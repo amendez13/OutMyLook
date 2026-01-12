@@ -1,5 +1,6 @@
 """Unit tests for CLI commands in src/cli/commands.py."""
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,6 +9,7 @@ from rich.panel import Panel
 
 import src.cli.commands as commands
 from src.auth import AuthenticationError
+from src.email.models import Email, EmailAddress
 
 
 def make_settings(token_file: str = "token.json") -> MagicMock:
@@ -265,4 +267,87 @@ def test_status_unexpected_error_exits() -> None:
     ):
         with pytest.raises(typer.Exit):
             commands.status()
+        mock_console.print.assert_called()
+
+
+def test_fetch_requires_authentication() -> None:
+    """Fetch should exit when not authenticated."""
+    mock_token_cache = MagicMock()
+
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(side_effect=AuthenticationError("auth failed"))
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+        with pytest.raises(typer.Exit):
+            commands.fetch()
+        mock_console.print.assert_called()
+
+
+def test_fetch_success_renders_table() -> None:
+    """Fetch should render a table when emails are returned."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    email = Email(
+        id="msg-1",
+        subject="Subject",
+        sender=EmailAddress(address="alice@example.com", name="Alice"),
+        received_at=datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc),
+        body_preview="Preview",
+        body_content=None,
+        is_read=False,
+        has_attachments=False,
+        folder_id="inbox",
+    )
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailClient", autospec=True) as mock_email_client,
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+        mock_email_client_instance = MagicMock()
+        mock_email_client_instance.list_emails = AsyncMock(return_value=[email])
+        mock_email_client.return_value = mock_email_client_instance
+
+        commands.fetch(limit=1, folder="inbox", skip=0)
+
+        mock_email_client_instance.list_emails.assert_awaited_with(folder="inbox", limit=1, skip=0)
+        mock_console.print.assert_called()
+
+
+def test_fetch_empty_folder() -> None:
+    """Fetch should handle empty folders gracefully."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailClient", autospec=True) as mock_email_client,
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+        mock_email_client_instance = MagicMock()
+        mock_email_client_instance.list_emails = AsyncMock(return_value=[])
+        mock_email_client.return_value = mock_email_client_instance
+
+        commands.fetch(limit=5, folder="inbox", skip=0)
+
+        mock_email_client_instance.list_emails.assert_awaited_with(folder="inbox", limit=5, skip=0)
         mock_console.print.assert_called()

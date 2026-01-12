@@ -8,9 +8,11 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
 
 from src.auth import AuthenticationError, GraphAuthenticator, TokenCache
 from src.config.settings import get_settings
+from src.email import Email, EmailClient
 
 app = typer.Typer(help="OutMyLook - Microsoft Outlook email management tool")
 console = Console()
@@ -236,6 +238,82 @@ async def _status_async() -> None:
             )
         )
         raise typer.Exit(code=1)
+
+
+@app.command()
+def fetch(
+    limit: int = typer.Option(25, "--limit", "-l", help="Number of emails to fetch"),
+    folder: str = typer.Option("inbox", "--folder", "-f", help="Mail folder to fetch from"),
+    skip: int = typer.Option(0, "--skip", help="Number of emails to skip"),
+) -> None:
+    """Fetch emails from Microsoft Graph."""
+    asyncio.run(_fetch_async(folder, limit, skip))
+
+
+async def _fetch_async(folder: str, limit: int, skip: int) -> None:
+    """Async implementation of fetch command."""
+    try:
+        settings = get_settings()
+        settings.setup_logging()
+
+        token_cache = TokenCache(settings.storage.token_file)
+        authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
+        graph_client = await authenticator.get_client()
+
+        email_client = EmailClient(graph_client)
+        emails = await email_client.list_emails(folder=folder, limit=limit, skip=skip)
+
+        if not emails:
+            console.print(
+                Panel.fit(
+                    f"No emails found in '{folder}'.",
+                    title="Fetch",
+                    border_style="yellow",
+                )
+            )
+            return
+
+        _render_email_table(emails, folder)
+
+    except AuthenticationError as e:
+        console.print(
+            Panel.fit(
+                f"Authentication failed\n\n{str(e)}\n\nRun 'outmylook login' to authenticate.",
+                title="Authentication Required",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
+    except Exception as e:
+        logger.exception("Fetch failed")
+        console.print(
+            Panel.fit(
+                f"Error fetching emails\n\n{str(e)}",
+                title="Error",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
+
+
+def _render_email_table(emails: list[Email], folder: str) -> None:
+    """Render fetched emails in a readable table."""
+    table = Table(title=f"Emails in {folder}")
+    table.add_column("Received", style="cyan")
+    table.add_column("From", style="magenta")
+    table.add_column("Subject", style="white")
+    table.add_column("Read", justify="center")
+    table.add_column("Attachments", justify="center")
+
+    for email in emails:
+        sender = email.sender.name or email.sender.address
+        received = email.received_at.strftime("%Y-%m-%d %H:%M")
+        subject = email.subject or "(no subject)"
+        is_read = "yes" if email.is_read else "no"
+        has_attachments = "yes" if email.has_attachments else "no"
+        table.add_row(received, sender, subject, is_read, has_attachments)
+
+    console.print(table)
 
 
 def main() -> None:

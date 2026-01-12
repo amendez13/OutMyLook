@@ -1,5 +1,5 @@
 """Command-line interface module."""
 
-from src.cli.commands import app, login, logout, main, status
+from src.cli.commands import app, fetch, login, logout, main, status
 
-__all__ = ["app", "login", "logout", "status", "main"]
+__all__ = ["app", "login", "logout", "status", "fetch", "main"]
