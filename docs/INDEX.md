@@ -8,6 +8,7 @@ Welcome to the OutMyLook documentation. This index provides easy access to all d
 - [Getting Started](#getting-started) - Start here if you're new
 - [Setup Guide](#setup-guides) - Configure your environment
 - [Usage Guide](#usage) - CLI usage and examples
+- [Database Guide](#database) - Persistent storage details
 
 **For Developers:**
 - [Architecture](#architecture) - Technical design and implementation details
@@ -44,6 +45,15 @@ Welcome to the OutMyLook documentation. This index provides easy access to all d
 - Authentication flow (login, status, logout)
 - Fetching email with pagination and folder selection
 - Configuration notes and troubleshooting
+
+---
+
+## Database
+
+**[DATABASE.md](DATABASE.md)**
+- Database setup and configuration
+- Schema overview and persistence flow
+- Migrations and troubleshooting
 
 ---
 
@@ -99,6 +109,7 @@ Welcome to the OutMyLook documentation. This index provides easy access to all d
 |----------|---------|----------|
 | [README.md](../README.md) | Getting started, installation, usage | All users |
 | [SETUP.md](SETUP.md) | Environment configuration | All users |
+| [DATABASE.md](DATABASE.md) | Database storage and migrations | All users |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Technical architecture and design | Developers |
 | [CI.md](CI.md) | CI/CD pipeline and development workflow | Developers |
 | [CLAUDE.md](../CLAUDE.md) | AI assistant guidance | Claude Code |

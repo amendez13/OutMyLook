@@ -66,6 +66,57 @@ and attachment presence. Empty folders are handled gracefully.
 If the access token is expired but a refresh token exists, the SDK refreshes
 silently. If authentication fails, run `python -m src.main login`.
 
+### Database
+
+Every fetch persists the returned messages to the configured database. The
+default SQLite file is located at `~/.outmylook/emails.db` and is created
+automatically. Duplicate Graph message IDs are not re-inserted; they are
+updated in place.
+
+Configuration:
+
+```yaml
+database:
+  url: "sqlite:///~/.outmylook/emails.db"
+```
+
+To use another engine, supply an async-capable SQLAlchemy URL and install the
+driver (see `docs/DATABASE.md` for examples).
+
+To inspect the stored data:
+
+```bash
+sqlite3 ~/.outmylook/emails.db
+sqlite> SELECT id, sender_email, subject FROM emails ORDER BY received_at DESC LIMIT 5;
+```
+
+More examples:
+
+```bash
+# Count stored emails
+sqlite3 ~/.outmylook/emails.db "SELECT COUNT(*) FROM emails;"
+
+# Show unread messages in the last 7 days
+sqlite3 ~/.outmylook/emails.db \
+  "SELECT sender_email, subject, received_at FROM emails WHERE is_read = 0 AND received_at >= datetime('now','-7 days') ORDER BY received_at DESC;"
+```
+
+```bash
+# Run migrations against a custom database
+export DATABASE_URL="postgresql+asyncpg://user:pass@localhost/outmylook"
+alembic upgrade head
+```
+
+```bash
+# Fetch and persist unread messages from the last week
+python -m src.main fetch --folder inbox --unread --after 2025-01-01
+
+# Fetch messages from a sender and subject filter
+python -m src.main fetch --from "boss@company.com" --subject "invoice" --has-attachments
+```
+
+See `docs/DATABASE.md` for schema details and migration commands.
+
 ### Folder selection
 
 The following well-known folders are recognized (case-insensitive):
