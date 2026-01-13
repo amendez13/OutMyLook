@@ -323,7 +323,7 @@ def test_fetch_success_renders_table() -> None:
 
         commands.fetch(limit=1, folder="inbox", skip=0)
 
-        mock_email_client_instance.list_emails.assert_awaited_with(folder="inbox", limit=1, skip=0)
+        mock_email_client_instance.list_emails.assert_awaited_with(folder="inbox", limit=1, skip=0, email_filter=None)
         mock_console.print.assert_called()
 
 
@@ -349,5 +349,135 @@ def test_fetch_empty_folder() -> None:
 
         commands.fetch(limit=5, folder="inbox", skip=0)
 
-        mock_email_client_instance.list_emails.assert_awaited_with(folder="inbox", limit=5, skip=0)
+        mock_email_client_instance.list_emails.assert_awaited_with(folder="inbox", limit=5, skip=0, email_filter=None)
         mock_console.print.assert_called()
+
+
+def test_build_email_filter_returns_none_when_no_filters() -> None:
+    """_build_email_filter should return None when no filters are provided."""
+    result = commands._build_email_filter(
+        from_address=None,
+        subject=None,
+        after=None,
+        before=None,
+        unread=False,
+        read=False,
+        has_attachments=False,
+    )
+    assert result is None
+
+
+def test_build_email_filter_combines_filters() -> None:
+    """_build_email_filter should combine multiple filters."""
+    result = commands._build_email_filter(
+        from_address="boss@company.com",
+        subject="invoice",
+        after="2024-01-01",
+        before="2024-01-31",
+        unread=True,
+        read=False,
+        has_attachments=True,
+    )
+    assert result is not None
+    assert result.build() == (
+        "from/emailAddress/address eq 'boss@company.com' and contains(subject, 'invoice') "
+        "and receivedDateTime ge 2024-01-01T00:00:00Z and receivedDateTime le 2024-01-31T00:00:00Z "
+        "and isRead eq false and hasAttachments eq true"
+    )
+
+
+def test_build_email_filter_rejects_read_and_unread() -> None:
+    """_build_email_filter should reject conflicting read flags."""
+    with pytest.raises(typer.BadParameter, match="Choose only one of --read or --unread"):
+        commands._build_email_filter(
+            from_address=None,
+            subject=None,
+            after=None,
+            before=None,
+            unread=True,
+            read=True,
+            has_attachments=False,
+        )
+
+
+def test_build_email_filter_rejects_bad_date() -> None:
+    """_build_email_filter should error on invalid date inputs."""
+    with pytest.raises(typer.BadParameter, match="Invalid after date"):
+        commands._build_email_filter(
+            from_address=None,
+            subject=None,
+            after="not-a-date",
+            before=None,
+            unread=False,
+            read=False,
+            has_attachments=False,
+        )
+
+
+def test_build_email_filter_rejects_empty_from() -> None:
+    """_build_email_filter should error on empty sender values."""
+    with pytest.raises(typer.BadParameter, match="Sender address cannot be empty"):
+        commands._build_email_filter(
+            from_address="   ",
+            subject=None,
+            after=None,
+            before=None,
+            unread=False,
+            read=False,
+            has_attachments=False,
+        )
+
+
+def test_build_email_filter_rejects_empty_subject() -> None:
+    """_build_email_filter should error on empty subject values."""
+    with pytest.raises(typer.BadParameter, match="Subject filter text cannot be empty"):
+        commands._build_email_filter(
+            from_address=None,
+            subject=" ",
+            after=None,
+            before=None,
+            unread=False,
+            read=False,
+            has_attachments=False,
+        )
+
+
+def test_build_email_filter_read_true() -> None:
+    """_build_email_filter should set read filter when requested."""
+    result = commands._build_email_filter(
+        from_address=None,
+        subject=None,
+        after=None,
+        before=None,
+        unread=False,
+        read=True,
+        has_attachments=False,
+    )
+    assert result is not None
+    assert result.build() == "isRead eq true"
+
+
+def test_build_email_filter_rejects_after_after_before() -> None:
+    """_build_email_filter should error when after is after before."""
+    with pytest.raises(typer.BadParameter, match="--after must be before or equal to --before"):
+        commands._build_email_filter(
+            from_address=None,
+            subject=None,
+            after="2024-02-01",
+            before="2024-01-01",
+            unread=False,
+            read=False,
+            has_attachments=False,
+        )
+
+
+def test_parse_date_input_accepts_zulu() -> None:
+    """_parse_date_input should parse Zulu timestamps."""
+    parsed = commands._parse_date_input("2024-01-01T10:00:00Z", "after")
+    assert parsed.tzinfo is not None
+
+
+def test_parse_date_input_rejects_empty() -> None:
+    """_parse_date_input should reject empty date input."""
+    with pytest.raises(typer.BadParameter, match="after date cannot be empty"):
+        commands._parse_date_input("  ", "after")

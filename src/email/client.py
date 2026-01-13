@@ -8,6 +8,7 @@ from typing import Any, Optional, cast
 
 from msgraph import GraphServiceClient
 
+from src.email.filters import EmailFilter
 from src.email.models import Email, MailFolder
 
 logger = logging.getLogger(__name__)
@@ -19,11 +20,18 @@ class EmailClient:
     def __init__(self, graph_client: GraphServiceClient):
         self._graph_client = graph_client
 
-    async def list_emails(self, folder: str = "inbox", limit: int = 25, skip: int = 0) -> list[Email]:
+    async def list_emails(
+        self,
+        folder: str = "inbox",
+        limit: int = 25,
+        skip: int = 0,
+        email_filter: Optional[EmailFilter] = None,
+    ) -> list[Email]:
         """Fetch emails from a folder with pagination."""
         folder_id = await self._resolve_folder_id(folder)
         messages_request = self._get_folder_messages_request(folder_id)
-        request_configuration = self._build_messages_request_config(limit=limit, skip=skip)
+        filter_query = email_filter.build() if email_filter else None
+        request_configuration = self._build_messages_request_config(limit=limit, skip=skip, filter_query=filter_query)
 
         if request_configuration is not None:
             response = await messages_request.get(request_configuration=request_configuration)
@@ -97,7 +105,7 @@ class EmailClient:
             folder_request = mail_folders.by_mail_folder_id(folder_id)
         return folder_request.messages
 
-    def _build_messages_request_config(self, limit: int, skip: int) -> Optional[Any]:
+    def _build_messages_request_config(self, limit: int, skip: int, filter_query: Optional[str] = None) -> Optional[Any]:
         builder = self._import_builder(
             [
                 "msgraph.generated.users.item.mail_folders.item.messages.messages_request_builder",
@@ -111,6 +119,7 @@ class EmailClient:
         query_params = builder.MessagesRequestBuilderGetQueryParameters(
             top=limit,
             skip=skip,
+            filter=filter_query or None,
             select=[
                 "id",
                 "subject",

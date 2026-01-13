@@ -2,7 +2,8 @@
 
 import asyncio
 import logging
-from typing import Optional
+from datetime import date, datetime, time, timezone
+from typing import Annotated, Callable, Optional
 
 import typer
 from rich.console import Console
@@ -12,7 +13,7 @@ from rich.table import Table
 
 from src.auth import AuthenticationError, GraphAuthenticator, TokenCache
 from src.config.settings import get_settings
-from src.email import Email, EmailClient
+from src.email import Email, EmailClient, EmailFilter
 
 app = typer.Typer(help="OutMyLook - Microsoft Outlook email management tool")
 console = Console()
@@ -242,15 +243,31 @@ async def _status_async() -> None:
 
 @app.command()
 def fetch(
-    limit: int = typer.Option(25, "--limit", "-l", help="Number of emails to fetch"),
-    folder: str = typer.Option("inbox", "--folder", "-f", help="Mail folder to fetch from"),
-    skip: int = typer.Option(0, "--skip", help="Number of emails to skip"),
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Number of emails to fetch")] = 25,
+    folder: Annotated[str, typer.Option("--folder", "-f", help="Mail folder to fetch from")] = "inbox",
+    skip: Annotated[int, typer.Option("--skip", help="Number of emails to skip")] = 0,
+    from_address: Annotated[Optional[str], typer.Option("--from", help="Filter by sender email address")] = None,
+    subject: Annotated[Optional[str], typer.Option("--subject", help="Filter by subject containing text")] = None,
+    after: Annotated[Optional[str], typer.Option("--after", help="Filter by received date (YYYY-MM-DD or ISO-8601)")] = None,
+    before: Annotated[Optional[str], typer.Option("--before", help="Filter by received date (YYYY-MM-DD or ISO-8601)")] = None,
+    unread: Annotated[bool, typer.Option("--unread", help="Filter to unread emails only")] = False,
+    read: Annotated[bool, typer.Option("--read", help="Filter to read emails only")] = False,
+    has_attachments: Annotated[bool, typer.Option("--has-attachments", help="Filter to emails with attachments")] = False,
 ) -> None:
     """Fetch emails from Microsoft Graph."""
-    asyncio.run(_fetch_async(folder, limit, skip))
+    email_filter = _build_email_filter(
+        from_address=from_address,
+        subject=subject,
+        after=after,
+        before=before,
+        unread=unread,
+        read=read,
+        has_attachments=has_attachments,
+    )
+    asyncio.run(_fetch_async(folder, limit, skip, email_filter))
 
 
-async def _fetch_async(folder: str, limit: int, skip: int) -> None:
+async def _fetch_async(folder: str, limit: int, skip: int, email_filter: Optional[EmailFilter]) -> None:
     """Async implementation of fetch command."""
     try:
         settings = get_settings()
@@ -261,7 +278,7 @@ async def _fetch_async(folder: str, limit: int, skip: int) -> None:
         graph_client = await authenticator.get_client()
 
         email_client = EmailClient(graph_client)
-        emails = await email_client.list_emails(folder=folder, limit=limit, skip=skip)
+        emails = await email_client.list_emails(folder=folder, limit=limit, skip=skip, email_filter=email_filter)
 
         if not emails:
             console.print(
@@ -294,6 +311,100 @@ async def _fetch_async(folder: str, limit: int, skip: int) -> None:
             )
         )
         raise typer.Exit(code=1)
+
+
+def _build_email_filter(
+    *,
+    from_address: Optional[str],
+    subject: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    unread: bool,
+    read: bool,
+    has_attachments: bool,
+) -> Optional[EmailFilter]:
+    """Build an EmailFilter from CLI options."""
+    filter_builder = EmailFilter()
+    has_conditions = False
+
+    if _apply_optional_text_filter(filter_builder.from_address, from_address):
+        has_conditions = True
+    if _apply_optional_text_filter(filter_builder.subject_contains, subject):
+        has_conditions = True
+
+    parsed_after = _apply_optional_date_filter(filter_builder.received_after, after, "after")
+    parsed_before = _apply_optional_date_filter(filter_builder.received_before, before, "before")
+    if parsed_after is not None:
+        has_conditions = True
+    if parsed_before is not None:
+        has_conditions = True
+    if parsed_after and parsed_before and parsed_after > parsed_before:
+        raise typer.BadParameter("--after must be before or equal to --before.")
+
+    if _apply_read_filter(filter_builder, read, unread):
+        has_conditions = True
+    if has_attachments:
+        filter_builder.has_attachments(True)
+        has_conditions = True
+
+    return filter_builder if has_conditions else None
+
+
+def _apply_optional_text_filter(apply_func: Callable[[str], EmailFilter], value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    try:
+        apply_func(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    return True
+
+
+def _apply_optional_date_filter(
+    apply_func: Callable[[datetime], EmailFilter],
+    value: Optional[str],
+    label: str,
+) -> Optional[datetime]:
+    if value is None:
+        return None
+    parsed = _parse_date_input(value, label)
+    apply_func(parsed)
+    return parsed
+
+
+def _apply_read_filter(filter_builder: EmailFilter, read: bool, unread: bool) -> bool:
+    if read and unread:
+        raise typer.BadParameter("Choose only one of --read or --unread.")
+    if read:
+        filter_builder.is_read(True)
+        return True
+    if unread:
+        filter_builder.is_read(False)
+        return True
+    return False
+
+
+def _parse_date_input(value: str, label: str) -> datetime:
+    """Parse a date or datetime string for filtering."""
+    raw = value.strip()
+    if not raw:
+        raise typer.BadParameter(f"{label} date cannot be empty.")
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+
+    parsed = None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        try:
+            parsed_date = date.fromisoformat(raw)
+            parsed = datetime.combine(parsed_date, time.min)
+        except ValueError as exc:
+            raise typer.BadParameter(f"Invalid {label} date '{value}'. Use YYYY-MM-DD or ISO-8601 datetime.") from exc
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _render_email_table(emails: list[Email], folder: str) -> None:
