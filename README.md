@@ -12,6 +12,7 @@ A Python application for managing Microsoft Outlook emails using the Microsoft G
 - **Token Caching**: Persistent token storage for seamless re-authentication
 - **CLI Interface**: User-friendly command-line interface for email management
 - **Automatic Token Refresh**: Tokens automatically refreshed before expiration
+- **Persistent Database Storage**: Fetch results are stored locally for later querying
 
 ## Quick Start
 
@@ -76,7 +77,8 @@ python -m src.main fetch --limit 10 --folder inbox  # Fetch emails
 # python -m src.main search   # Search emails
 ```
 
-See `docs/USAGE.md` for a full usage guide, including configuration tips, folder selection, and pagination.
+See `docs/USAGE.md` for a full usage guide, including configuration tips, folder selection, pagination,
+and database storage details.
 
 ## Configuration
 
@@ -112,6 +114,7 @@ logging:
 ```
 
 **Important**: You need to register an Azure AD application to get your `client_id`. See [Setup Guide](docs/SETUP.md) for detailed instructions.
+For database configuration and migrations, see [Database Guide](docs/DATABASE.md).
 
 ## Project Structure
 

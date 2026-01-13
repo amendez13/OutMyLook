@@ -199,6 +199,48 @@ async def test_list_emails_skips_invalid_message(caplog: pytest.LogCaptureFixtur
 
 
 @pytest.mark.asyncio
+async def test_list_emails_saves_to_repository() -> None:
+    """list_emails should persist emails when a repository is configured."""
+    graph_client = MagicMock()
+
+    message = MagicMock()
+    message.id = "msg-10"
+    message.subject = "Hello"
+    message.sender = MagicMock()
+    message.sender.email_address = MagicMock()
+    message.sender.email_address.address = "alice@example.com"
+    message.sender.email_address.name = "Alice"
+    message.received_date_time = datetime(2024, 1, 2, 12, 0, tzinfo=timezone.utc)
+    message.body_preview = "Preview"
+    message.body = MagicMock(content="Body")
+    message.is_read = False
+    message.has_attachments = True
+    message.parent_folder_id = "inbox"
+
+    response = MagicMock()
+    response.value = [message]
+
+    messages_request = MagicMock()
+    messages_request.get = AsyncMock(return_value=response)
+
+    folder_request = MagicMock()
+    folder_request.messages = messages_request
+
+    graph_client.me.mail_folders.by_id.return_value = folder_request
+
+    repository = MagicMock()
+    repository.save_many = AsyncMock()
+
+    client = EmailClient(graph_client, email_repository=repository)
+
+    with patch.object(client, "_build_messages_request_config", return_value=None):
+        emails = await client.list_emails(folder="Inbox", limit=1, skip=0)
+
+    assert len(emails) == 1
+    repository.save_many.assert_awaited_once_with(emails)
+
+
+@pytest.mark.asyncio
 async def test_get_email_uses_by_id_when_missing_by_message_id() -> None:
     """get_email should use by_id when by_message_id is unavailable."""
     graph_client = MagicMock()

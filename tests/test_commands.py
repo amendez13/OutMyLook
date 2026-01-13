@@ -1,7 +1,8 @@
 """Unit tests for CLI commands in src/cli/commands.py."""
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 import typer
@@ -16,10 +17,19 @@ def make_settings(token_file: str = "token.json") -> MagicMock:
     """Create a fake settings object with a storage.token_file attribute."""
     storage = MagicMock()
     storage.token_file = token_file
+    database = MagicMock()
+    database.url = "sqlite:///test.db"
     settings = MagicMock()
     settings.storage = storage
+    settings.database = database
     settings.setup_logging = MagicMock()
+    settings.ensure_directories = MagicMock()
     return settings
+
+
+@asynccontextmanager
+async def fake_session_context():
+    yield MagicMock()
 
 
 def test_status_not_authenticated() -> None:
@@ -175,6 +185,7 @@ def test_login_authentication_error_exits() -> None:
         patch("src.cli.commands.get_settings", return_value=make_settings()),
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
         patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
         patch("src.cli.commands.console") as mock_console,
     ):
         mock_graph_auth.from_settings.return_value = fake_authenticator
@@ -314,6 +325,7 @@ def test_fetch_success_renders_table() -> None:
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
         patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
         patch("src.cli.commands.EmailClient", autospec=True) as mock_email_client,
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
         patch("src.cli.commands.console") as mock_console,
     ):
         mock_graph_auth.from_settings.return_value = fake_authenticator
@@ -323,6 +335,7 @@ def test_fetch_success_renders_table() -> None:
 
         commands.fetch(limit=1, folder="inbox", skip=0)
 
+        mock_email_client.assert_called_with(fake_client, email_repository=ANY)
         mock_email_client_instance.list_emails.assert_awaited_with(folder="inbox", limit=1, skip=0, email_filter=None)
         mock_console.print.assert_called()
 
@@ -340,6 +353,7 @@ def test_fetch_empty_folder() -> None:
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
         patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
         patch("src.cli.commands.EmailClient", autospec=True) as mock_email_client,
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
         patch("src.cli.commands.console") as mock_console,
     ):
         mock_graph_auth.from_settings.return_value = fake_authenticator
@@ -349,6 +363,7 @@ def test_fetch_empty_folder() -> None:
 
         commands.fetch(limit=5, folder="inbox", skip=0)
 
+        mock_email_client.assert_called_with(fake_client, email_repository=ANY)
         mock_email_client_instance.list_emails.assert_awaited_with(folder="inbox", limit=5, skip=0, email_filter=None)
         mock_console.print.assert_called()
 

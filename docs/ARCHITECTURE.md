@@ -103,6 +103,30 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
    - Normalize Graph fields (e.g., `receivedDateTime`, `bodyPreview`)
    - Validate required values and provide consistent typing
 
+### Database Module
+
+**Purpose**: Persist fetched emails for local querying and historical access.
+
+**Responsibilities**:
+- Define SQLAlchemy ORM models for emails and attachments
+- Initialize schema automatically for SQLite databases
+- Provide repository methods for saving, deduplication, and search
+- Support Alembic migrations for schema evolution
+
+**Key Files**:
+- `src/database/models.py` - ORM models and indexes
+- `src/database/repository.py` - Async session helpers and repository
+- `src/database/migrations/` - Alembic migration scripts
+- `alembic.ini` - Alembic configuration
+
+**Key Classes**:
+
+1. **EmailRepository**
+   - `save()` / `save_many()` - Insert or update emails
+   - `get_by_id()` - Fetch a stored email by Graph ID
+   - `list_all()` - List stored emails with pagination
+   - `search()` - Filter by sender, subject, or date range
+
 ### Configuration Module
 
 **Purpose**: Manages application configuration and settings
@@ -163,7 +187,10 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 5. **Model Mapping**:
    - Email models normalize Graph fields into typed data
    - Invalid messages are skipped with a warning
-6. **CLI Output**:
+6. **Persistence**:
+   - EmailRepository bulk-saves emails with deduplication by message ID
+   - Existing rows are updated to reflect new metadata
+7. **CLI Output**:
    - The CLI renders a table of received time, sender, subject, and flags
 
 ## Design Decisions

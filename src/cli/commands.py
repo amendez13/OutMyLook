@@ -13,6 +13,7 @@ from rich.table import Table
 
 from src.auth import AuthenticationError, GraphAuthenticator, TokenCache
 from src.config.settings import get_settings
+from src.database.repository import EmailRepository, get_session
 from src.email import Email, EmailClient, EmailFilter
 
 app = typer.Typer(help="OutMyLook - Microsoft Outlook email management tool")
@@ -272,13 +273,16 @@ async def _fetch_async(folder: str, limit: int, skip: int, email_filter: Optiona
     try:
         settings = get_settings()
         settings.setup_logging()
+        settings.ensure_directories()
 
         token_cache = TokenCache(settings.storage.token_file)
         authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
         graph_client = await authenticator.get_client()
 
-        email_client = EmailClient(graph_client)
-        emails = await email_client.list_emails(folder=folder, limit=limit, skip=skip, email_filter=email_filter)
+        async with get_session(settings.database.url) as session:
+            repository = EmailRepository(session)
+            email_client = EmailClient(graph_client, email_repository=repository)
+            emails = await email_client.list_emails(folder=folder, limit=limit, skip=skip, email_filter=email_filter)
 
         if not emails:
             console.print(

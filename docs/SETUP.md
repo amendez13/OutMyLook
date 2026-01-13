@@ -75,7 +75,30 @@ nano config/config.yaml
 # Or use your preferred editor
 ```
 
-### 6. Verify Installation
+### 6. Database Setup (Optional)
+
+OutMyLook stores fetched emails in a local database by default. For SQLite,
+no extra setup is required; the file is created on first use.
+
+If you want to use another database engine, set `database.url` in
+`config/config.yaml` to an async-capable SQLAlchemy URL and install the driver.
+Examples:
+
+```yaml
+database:
+  url: "postgresql+asyncpg://user:pass@localhost/dbname"
+```
+
+For schema management, Alembic is preconfigured in `alembic.ini`. You can
+run migrations manually:
+
+```bash
+alembic upgrade head
+```
+
+See `docs/DATABASE.md` for more detail.
+
+### 7. Verify Installation
 
 ```bash
 # Run tests to verify setup

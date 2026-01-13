@@ -8,6 +8,7 @@ from typing import Any, Optional, cast
 
 from msgraph import GraphServiceClient
 
+from src.database.repository import EmailRepository
 from src.email.filters import EmailFilter
 from src.email.models import Email, MailFolder
 
@@ -17,8 +18,9 @@ logger = logging.getLogger(__name__)
 class EmailClient:
     """Wrapper around GraphServiceClient for email operations."""
 
-    def __init__(self, graph_client: GraphServiceClient):
+    def __init__(self, graph_client: GraphServiceClient, email_repository: Optional[EmailRepository] = None):
         self._graph_client = graph_client
+        self._email_repository = email_repository
 
     async def list_emails(
         self,
@@ -45,6 +47,8 @@ class EmailClient:
                 emails.append(Email.from_graph_message(message, folder_id=folder_id))
             except ValueError as exc:
                 logger.warning("Skipping message due to mapping error: %s", exc)
+        if self._email_repository and emails:
+            await self._email_repository.save_many(emails)
         return emails
 
     async def get_email(self, message_id: str) -> Email:

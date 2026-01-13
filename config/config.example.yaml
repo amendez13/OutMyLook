@@ -26,9 +26,9 @@ database:
   # Use ~/ for home directory, it will be expanded automatically
   url: "sqlite:///~/.outmylook/emails.db"
 
-  # For other databases, use appropriate connection strings:
-  # PostgreSQL: "postgresql://user:password@localhost/dbname"
-  # MySQL: "mysql://user:password@localhost/dbname"
+  # For other databases, use async-capable connection strings:
+  # PostgreSQL: "postgresql+asyncpg://user:password@localhost/dbname"
+  # MySQL: "mysql+aiomysql://user:password@localhost/dbname"
 
 # Storage Settings
 storage:
