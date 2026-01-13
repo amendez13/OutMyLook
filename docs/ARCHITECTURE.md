@@ -176,25 +176,25 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
    - User visits URL and enters code in browser
    - User authenticates with Microsoft account
    - Azure AD returns access and refresh tokens
-   - TokenCache saves tokens to a local JSON file (~/.outmylook/tokens.json)
+   - MSAL stores tokens in its persistent cache
+   - OutMyLook persists a non-secret auth record to `~/.outmylook/auth_record.json`
    - GraphServiceClient is created with valid credentials
 
 2. **Subsequent Access** (Cached Token):
    - User runs a command requiring authentication
-   - TokenCache checks for valid cached token
-   - If token exists and not expired, use cached token
-   - If token expired, automatically refresh using refresh token
-   - Create GraphServiceClient with cached credentials
+   - DeviceCodeCredential loads the auth record
+   - MSAL silently acquires or refreshes tokens
+   - GraphServiceClient is created with cached credentials
+   - TokenCache writes token metadata to `storage.token_file` for status output
 
 3. **Token Refresh**:
-   - TokenCache detects token expiring within 5 minutes
-   - GraphAuthenticator requests new token using refresh token
-   - New token saved to cache
+   - MSAL handles refresh tokens automatically when access tokens expire
    - Application continues without user intervention
 
 4. **Logout**:
    - User runs `python -m src.main logout`
-   - TokenCache clears cached tokens
+   - TokenCache clears token metadata
+   - Auth record is removed from disk
    - User must re-authenticate on next use
 
 ### Email Fetch Flow
@@ -251,14 +251,15 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 
 **Context**: Requiring re-authentication on every command execution would severely degrade user experience. Need secure, persistent token storage.
 
-**Decision**: Store OAuth tokens in a local JSON file (~/.outmylook/tokens.json) with restrictive file permissions (600). Implement automatic token refresh before expiration.
+**Decision**: Use MSAL persistent caching and store a non-secret auth record locally
+(`~/.outmylook/auth_record.json`). Keep `tokens.json` for status output only.
 
 **Consequences**:
 - Pro: Users authenticate once, tokens persist across sessions
 - Pro: Automatic refresh eliminates re-authentication for expired tokens
-- Pro: File permissions (600) protect sensitive tokens
-- Pro: Simple JSON format, easy to inspect and debug
-- Con: Tokens stored on disk (restricted permissions but still a security consideration)
+- Pro: Auth record is non-secret and easy to clear
+- Pro: Token metadata JSON remains useful for status reporting
+- Con: MSAL cache still stores tokens on disk (OS-managed)
 - Con: Tokens not shared across machines (each machine needs separate auth)
 
 ### Decision 3: Async/Await for API Calls
@@ -276,8 +277,8 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 
 ## Performance Considerations
 
-- **Token Caching**: Tokens cached to disk eliminate need for re-authentication, reducing latency for subsequent API calls
-- **Automatic Refresh**: Tokens refreshed automatically before expiration (5-minute buffer) to prevent authentication delays
+- **Token Caching**: MSAL persistent cache enables silent token reuse across CLI runs
+- **Automatic Refresh**: Tokens refreshed automatically when access tokens expire
 - **Async I/O**: Non-blocking file operations prevent UI freezes during token read/write operations
 - **Minimal Dependencies**: Using official Microsoft libraries reduces overhead and ensures optimal performance
 
@@ -293,14 +294,14 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 
 ### Token Storage
 
-- **File Location**: Tokens stored in user home directory (~/.outmylook/tokens.json)
-- **File Permissions**: Automatically set to 0o600 (read/write for owner only)
-- **Token Refresh**: Refresh tokens used to obtain new access tokens without re-authentication
-- **Clear on Logout**: Tokens completely removed from disk on logout
+- **Auth Record**: Stored at `~/.outmylook/auth_record.json` (non-secret account metadata)
+- **MSAL Cache**: Stored via MSAL/azure-identity persistent cache (OS-managed)
+- **Token Metadata**: `~/.outmylook/tokens.json` is informational for status output
+- **Clear on Logout**: Auth record and token metadata removed from disk on logout
 
 ### Best Practices
 
-- **Minimal Scopes**: Request only necessary Microsoft Graph API scopes (Mail.Read, User.Read, offline_access)
+- **Minimal Scopes**: Request only necessary Microsoft Graph API scopes (Mail.Read, User.Read)
 - **Token Validation**: Check token expiration before use with 5-minute buffer
 - **Error Handling**: Authentication errors caught and reported clearly to users
 - **Logging**: Sensitive data (tokens, credentials) never logged
