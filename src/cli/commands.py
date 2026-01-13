@@ -2,26 +2,91 @@
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
 from pathlib import Path
-from typing import Annotated, Callable, Optional
+from typing import Annotated, Callable, Optional, TypedDict
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.attachments import AttachmentHandler
 from src.auth import AuthenticationError, GraphAuthenticator, TokenCache
-from src.config.settings import get_settings
+from src.cli.exporters import SUPPORTED_FORMATS, export_emails
+from src.cli.formatters import build_email_table, build_status_panel, format_bytes
+from src.config.settings import Settings, get_settings
 from src.database.models import EmailModel
 from src.database.repository import AttachmentRepository, EmailRepository, get_session
-from src.email import Email, EmailClient, EmailFilter
+from src.email import EmailClient, EmailFilter
 
 app = typer.Typer(help="OutMyLook - Microsoft Outlook email management tool")
 console = Console()
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class OutputOptions:
+    verbose: bool = False
+    quiet: bool = False
+
+
+_OUTPUT = OutputOptions()
+
+
+class EmailSearchFilters(TypedDict):
+    sender: Optional[str]
+    subject: Optional[str]
+    date_from: Optional[datetime]
+    date_to: Optional[datetime]
+    is_read: Optional[bool]
+    has_attachments: Optional[bool]
+
+
+@app.callback()
+def main_callback(
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show verbose output")] = False,
+    quiet: Annotated[bool, typer.Option("--quiet", help="Suppress non-essential output")] = False,
+) -> None:
+    """Configure global CLI output."""
+    _configure_output(verbose, quiet)
+
+
+def _configure_output(verbose: bool, quiet: bool) -> None:
+    if verbose and quiet:
+        raise typer.BadParameter("Choose only one of --verbose or --quiet.")
+    _OUTPUT.verbose = verbose
+    _OUTPUT.quiet = quiet
+
+
+def _setup_logging(settings: Settings) -> None:
+    settings.setup_logging()
+    root_logger = logging.getLogger()
+    if _OUTPUT.verbose:
+        root_logger.setLevel(logging.DEBUG)
+    if _OUTPUT.quiet:
+        root_logger.setLevel(logging.ERROR)
+
+
+def _console_print(*args, level: str = "info") -> None:
+    if _OUTPUT.quiet and level not in {"error", "summary"}:
+        return
+    console.print(*args)
+
+
+def _render_error(action: str, message: str, exc: Exception) -> None:
+    logger.exception("%s failed", action)
+    _console_print(
+        Panel.fit(
+            f"✗ {message}\n\n{str(exc)}",
+            title="Error",
+            border_style="red",
+        ),
+        level="error",
+    )
 
 
 @app.command()
@@ -49,7 +114,7 @@ async def _login_async(config_file: Optional[str]) -> None:
     try:
         # Load settings
         settings = get_settings()
-        settings.setup_logging()
+        _setup_logging(settings)
 
         # Check if already authenticated
         token_cache = TokenCache(settings.storage.token_file)
@@ -57,7 +122,7 @@ async def _login_async(config_file: Optional[str]) -> None:
         if token_cache.has_valid_token():
             token_info = await token_cache.get_token_info()
             if token_info:
-                console.print(
+                _console_print(
                     Panel.fit(
                         f"✓ Already authenticated!\n\n"
                         f"Token expires: {token_info['expires_at']}\n"
@@ -72,13 +137,13 @@ async def _login_async(config_file: Optional[str]) -> None:
 
             # Clear existing token
             await token_cache.clear()
-            console.print("[yellow]Cleared existing token[/yellow]\n")
+            _console_print("[yellow]Cleared existing token[/yellow]\n")
 
         # Create authenticator
         authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
 
         # Display authentication instructions
-        console.print(
+        _console_print(
             Panel.fit(
                 "You will be prompted to:\n"
                 "1. Visit a URL in your browser\n"
@@ -104,10 +169,10 @@ async def _login_async(config_file: Optional[str]) -> None:
                 # Get user info to confirm
                 user = await client.me.get()
 
-                console.print()
+                _console_print()
                 display_name = user.display_name if user else "Unknown"
                 email = user.user_principal_name if user else "Unknown"
-                console.print(
+                _console_print(
                     Panel.fit(
                         f"✓ Authentication successful!\n\n"
                         f"Logged in as: {display_name}\n"
@@ -115,28 +180,23 @@ async def _login_async(config_file: Optional[str]) -> None:
                         f"Token cached to: {settings.storage.token_file}",
                         title="Success",
                         border_style="green",
-                    )
+                    ),
+                    level="summary",
                 )
 
             except AuthenticationError as e:
-                console.print(
+                _console_print(
                     Panel.fit(
                         f"✗ Authentication failed\n\n{str(e)}",
                         title="Error",
                         border_style="red",
-                    )
+                    ),
+                    level="error",
                 )
                 raise typer.Exit(code=1)
 
     except Exception as e:
-        logger.exception("Login failed")
-        console.print(
-            Panel.fit(
-                f"✗ Unexpected error during login\n\n{str(e)}",
-                title="Error",
-                border_style="red",
-            )
-        )
+        _render_error("Login", "Unexpected error during login", e)
         raise typer.Exit(code=1)
 
 
@@ -150,32 +210,36 @@ async def _logout_async() -> None:
     """Async implementation of logout command."""
     try:
         settings = get_settings()
+        _setup_logging(settings)
+        settings.ensure_directories()
+        logger.debug("Starting logout")
         token_cache = TokenCache(settings.storage.token_file)
 
         if not token_cache.has_valid_token():
-            console.print(
+            _console_print(
                 Panel.fit(
                     "No active session found. You are not logged in.",
                     title="Logout",
                     border_style="yellow",
-                )
+                ),
+                level="summary",
             )
             return
 
         # Clear the token
         await token_cache.clear()
 
-        console.print(
+        _console_print(
             Panel.fit(
                 "✓ Successfully logged out\n\nYour authentication token has been removed.",
                 title="Logout",
                 border_style="green",
-            )
+            ),
+            level="summary",
         )
 
     except Exception as e:
-        logger.exception("Logout failed")
-        console.print(Panel.fit(f"✗ Error during logout\n\n{str(e)}", title="Error", border_style="red"))
+        _render_error("Logout", "Error during logout", e)
         raise typer.Exit(code=1)
 
 
@@ -189,59 +253,47 @@ async def _status_async() -> None:
     """Async implementation of status command."""
     try:
         settings = get_settings()
+        _setup_logging(settings)
+        settings.ensure_directories()
         token_cache = TokenCache(settings.storage.token_file)
 
-        if not token_cache.has_valid_token():
-            console.print(
-                Panel.fit(
-                    "✗ Not authenticated\n\n" "Run 'outmylook login' to authenticate with Microsoft Graph.",
-                    title="Authentication Status",
-                    border_style="red",
-                )
-            )
-            return
-
-        token_info = await token_cache.get_token_info()
-
-        if token_info:
-            expiring_soon = token_cache.is_token_expiring_soon()
-            status_icon = "⚠" if expiring_soon else "✓"
-            border_color = "yellow" if expiring_soon else "green"
-
-            console.print(
-                Panel.fit(
-                    f"{status_icon} Authenticated\n\n"
-                    f"Token expires: {token_info['expires_at']}\n"
-                    f"Time until expiry: {token_info['seconds_until_expiry']} seconds\n"
-                    f"Scopes: {', '.join(token_info['scopes'])}\n"
-                    f"Cached at: {token_info['cached_at']}",
-                    title="Authentication Status",
-                    border_style=border_color,
-                )
-            )
-
-            if expiring_soon:
-                console.print(
-                    "\n[yellow]Note: Token is expiring soon. " "It will be refreshed automatically on next use.[/yellow]"
-                )
+        auth_lines: list[tuple[str, str]] = []
+        token_info = None
+        if token_cache.has_valid_token():
+            token_info = await token_cache.get_token_info()
+            user_hint = None if token_info is None else token_info.get("user_principal_name")
+            auth_value = f"✓ Logged in as {user_hint}" if user_hint else "✓ Authenticated"
+            auth_lines.append(("Authentication", auth_value))
+            if token_info:
+                auth_lines.append(("Token expires", str(token_info.get("expires_at", "Unknown"))))
         else:
-            console.print(
-                Panel.fit(
-                    "✗ Token information unavailable",
-                    title="Authentication Status",
-                    border_style="red",
-                )
-            )
+            auth_lines.append(("Authentication", "✗ Not authenticated"))
+
+        async with get_session(settings.database.url) as session:
+            email_count = await _get_email_count(session)
+
+        db_label = _format_database_label(settings.database.url, email_count)
+        attachments_count, attachments_bytes = _get_attachment_stats(Path(settings.storage.attachments_dir))
+        attachments_label = (
+            f"{Path(settings.storage.attachments_dir).expanduser()} "
+            f"({attachments_count} files, {format_bytes(attachments_bytes)})"
+        )
+
+        status_panel = build_status_panel(
+            [
+                *auth_lines,
+                ("Database", db_label),
+                ("Attachments", attachments_label),
+            ],
+            title="Status",
+        )
+        _console_print(status_panel, level="summary")
+
+        if token_info and token_cache.is_token_expiring_soon():
+            _console_print("[yellow]Note: Token is expiring soon. It will be refreshed automatically on next use.[/yellow]")
 
     except Exception as e:
-        logger.exception("Status check failed")
-        console.print(
-            Panel.fit(
-                f"✗ Error checking status\n\n{str(e)}",
-                title="Error",
-                border_style="red",
-            )
-        )
+        _render_error("Status", "Error checking status", e)
         raise typer.Exit(code=1)
 
 
@@ -275,8 +327,15 @@ async def _fetch_async(folder: str, limit: int, skip: int, email_filter: Optiona
     """Async implementation of fetch command."""
     try:
         settings = get_settings()
-        settings.setup_logging()
+        _setup_logging(settings)
         settings.ensure_directories()
+        logger.debug(
+            "Starting fetch: folder=%s limit=%s skip=%s filter=%s",
+            folder,
+            limit,
+            skip,
+            email_filter,
+        )
 
         token_cache = TokenCache(settings.storage.token_file)
         authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
@@ -288,35 +347,42 @@ async def _fetch_async(folder: str, limit: int, skip: int, email_filter: Optiona
             emails = await email_client.list_emails(folder=folder, limit=limit, skip=skip, email_filter=email_filter)
 
         if not emails:
-            console.print(
+            _console_print(
                 Panel.fit(
                     f"No emails found in '{folder}'.",
                     title="Fetch",
                     border_style="yellow",
-                )
+                ),
+                level="summary",
             )
             return
 
-        _render_email_table(emails, folder)
+        if _OUTPUT.quiet:
+            _console_print(
+                Panel.fit(
+                    f"✓ Fetched {len(emails)} email(s) from '{folder}'.",
+                    title="Fetch",
+                    border_style="green",
+                ),
+                level="summary",
+            )
+            return
+
+        table = build_email_table(emails, title=f"Emails in {folder}", include_id=False, include_read=True)
+        _console_print(table)
 
     except AuthenticationError as e:
-        console.print(
+        _console_print(
             Panel.fit(
                 f"Authentication failed\n\n{str(e)}\n\nRun 'outmylook login' to authenticate.",
                 title="Authentication Required",
                 border_style="red",
-            )
+            ),
+            level="error",
         )
         raise typer.Exit(code=1)
     except Exception as e:
-        logger.exception("Fetch failed")
-        console.print(
-            Panel.fit(
-                f"Error fetching emails\n\n{str(e)}",
-                title="Error",
-                border_style="red",
-            )
-        )
+        _render_error("Fetch", "Error fetching emails", e)
         raise typer.Exit(code=1)
 
 
@@ -335,6 +401,38 @@ def download(
     asyncio.run(_download_async(email_id, attachment_id, unread, has_attachments))
 
 
+@app.command("list")
+def list_emails(
+    limit: Annotated[Optional[int], typer.Option("--limit", "-l", help="Max emails to list")] = None,
+    offset: Annotated[int, typer.Option("--offset", help="Offset into stored emails")] = 0,
+    from_address: Annotated[Optional[str], typer.Option("--from", help="Filter by sender email address")] = None,
+    subject: Annotated[Optional[str], typer.Option("--subject", help="Filter by subject containing text")] = None,
+    after: Annotated[Optional[str], typer.Option("--after", help="Filter by received date (YYYY-MM-DD or ISO-8601)")] = None,
+    before: Annotated[Optional[str], typer.Option("--before", help="Filter by received date (YYYY-MM-DD or ISO-8601)")] = None,
+    unread: Annotated[bool, typer.Option("--unread", help="Filter to unread emails only")] = False,
+    read: Annotated[bool, typer.Option("--read", help="Filter to read emails only")] = False,
+    has_attachments: Annotated[bool, typer.Option("--has-attachments", help="Filter to emails with attachments")] = False,
+) -> None:
+    """List stored emails from the local database."""
+    asyncio.run(_list_async(limit, offset, from_address, subject, after, before, unread, read, has_attachments))
+
+
+@app.command()
+def export(
+    output_path: Annotated[Path, typer.Argument(help="Export file path")],
+    fmt: Annotated[str, typer.Option("--format", "-f", help="Export format (json or csv)")] = "json",
+    from_address: Annotated[Optional[str], typer.Option("--from", help="Filter by sender email address")] = None,
+    subject: Annotated[Optional[str], typer.Option("--subject", help="Filter by subject containing text")] = None,
+    after: Annotated[Optional[str], typer.Option("--after", help="Filter by received date (YYYY-MM-DD or ISO-8601)")] = None,
+    before: Annotated[Optional[str], typer.Option("--before", help="Filter by received date (YYYY-MM-DD or ISO-8601)")] = None,
+    unread: Annotated[bool, typer.Option("--unread", help="Filter to unread emails only")] = False,
+    read: Annotated[bool, typer.Option("--read", help="Filter to read emails only")] = False,
+    has_attachments: Annotated[bool, typer.Option("--has-attachments", help="Filter to emails with attachments")] = False,
+) -> None:
+    """Export stored emails to JSON or CSV."""
+    asyncio.run(_export_async(output_path, fmt, from_address, subject, after, before, unread, read, has_attachments))
+
+
 async def _download_async(
     email_id: Optional[str],
     attachment_id: Optional[str],
@@ -344,8 +442,15 @@ async def _download_async(
     """Async implementation of download command."""
     try:
         settings = get_settings()
-        settings.setup_logging()
+        _setup_logging(settings)
         settings.ensure_directories()
+        logger.debug(
+            "Starting download: email_id=%s attachment_id=%s unread=%s has_attachments=%s",
+            email_id,
+            attachment_id,
+            unread,
+            has_attachments,
+        )
 
         if attachment_id and not email_id:
             raise typer.BadParameter("--attachment requires an email_id argument.")
@@ -375,25 +480,162 @@ async def _download_async(
             await _download_for_filtered_emails(handler, emails)
 
     except AuthenticationError as e:
-        console.print(
+        _console_print(
             Panel.fit(
                 f"Authentication failed\n\n{str(e)}\n\nRun 'outmylook login' to authenticate.",
                 title="Authentication Required",
                 border_style="red",
-            )
+            ),
+            level="error",
         )
         raise typer.Exit(code=1)
     except typer.BadParameter:
         raise
     except Exception as e:
-        logger.exception("Download failed")
-        console.print(
-            Panel.fit(
-                f"Error downloading attachments\n\n{str(e)}",
-                title="Error",
-                border_style="red",
-            )
+        _render_error("Download", "Error downloading attachments", e)
+        raise typer.Exit(code=1)
+
+
+async def _list_async(
+    limit: Optional[int],
+    offset: int,
+    from_address: Optional[str],
+    subject: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    unread: bool,
+    read: bool,
+    has_attachments: bool,
+) -> None:
+    """Async implementation of list command."""
+    try:
+        settings = get_settings()
+        _setup_logging(settings)
+        settings.ensure_directories()
+        logger.debug(
+            "Listing emails: limit=%s offset=%s from=%s subject=%s after=%s before=%s unread=%s read=%s has_attachments=%s",
+            limit,
+            offset,
+            from_address,
+            subject,
+            after,
+            before,
+            unread,
+            read,
+            has_attachments,
         )
+
+        filters, has_conditions = _build_local_filters(
+            from_address=from_address,
+            subject=subject,
+            after=after,
+            before=before,
+            unread=unread,
+            read=read,
+            has_attachments=has_attachments,
+        )
+
+        async with get_session(settings.database.url) as session:
+            repository = EmailRepository(session)
+            if has_conditions:
+                emails = await repository.search(**filters)
+                emails = _apply_offset_limit(emails, limit=limit, offset=offset)
+            else:
+                emails = await repository.list_all(limit=limit, offset=offset)
+
+        if not emails:
+            _console_print(
+                Panel.fit(
+                    "No stored emails found.",
+                    title="List",
+                    border_style="yellow",
+                ),
+                level="summary",
+            )
+            return
+
+        if _OUTPUT.quiet:
+            _console_print(
+                Panel.fit(
+                    f"✓ Found {len(emails)} stored email(s).",
+                    title="List",
+                    border_style="green",
+                ),
+                level="summary",
+            )
+            return
+
+        table = build_email_table(emails, title="Stored Emails", include_id=True, include_read=False)
+        _console_print(table)
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        _render_error("List", "Error listing emails", e)
+        raise typer.Exit(code=1)
+
+
+async def _export_async(
+    output_path: Path,
+    fmt: str,
+    from_address: Optional[str],
+    subject: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    unread: bool,
+    read: bool,
+    has_attachments: bool,
+) -> None:
+    """Async implementation of export command."""
+    try:
+        settings = get_settings()
+        _setup_logging(settings)
+        settings.ensure_directories()
+        logger.debug(
+            "Exporting emails: output=%s format=%s from=%s subject=%s after=%s before=%s unread=%s read=%s has_attachments=%s",
+            output_path,
+            fmt,
+            from_address,
+            subject,
+            after,
+            before,
+            unread,
+            read,
+            has_attachments,
+        )
+
+        format_value = _normalize_export_format(fmt)
+        filters, has_conditions = _build_local_filters(
+            from_address=from_address,
+            subject=subject,
+            after=after,
+            before=before,
+            unread=unread,
+            read=read,
+            has_attachments=has_attachments,
+        )
+
+        async with get_session(settings.database.url) as session:
+            repository = EmailRepository(session)
+            if has_conditions:
+                emails = await repository.search(**filters)
+            else:
+                emails = await repository.list_all(limit=None, offset=0)
+
+        export_emails(emails, output_path, format_value)
+        _console_print(
+            Panel.fit(
+                f"✓ Exported {len(emails)} email(s) to:\n{output_path}",
+                title="Export",
+                border_style="green",
+            ),
+            level="summary",
+        )
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        _render_error("Export", "Error exporting emails", e)
         raise typer.Exit(code=1)
 
 
@@ -404,43 +646,47 @@ async def _download_for_single_email(
 ) -> None:
     if attachment_id:
         path = await handler.download_attachment(email_id, attachment_id)
-        console.print(
+        _console_print(
             Panel.fit(
                 f"✓ Downloaded attachment to:\n{path}",
                 title="Download",
                 border_style="green",
-            )
+            ),
+            level="summary",
         )
         return
 
     paths = await handler.download_all_for_email(email_id)
     if not paths:
-        console.print(
+        _console_print(
             Panel.fit(
                 f"No attachments found for email '{email_id}'.",
                 title="Download",
                 border_style="yellow",
-            )
+            ),
+            level="summary",
         )
         return
 
-    console.print(
+    _console_print(
         Panel.fit(
             f"✓ Downloaded {len(paths)} attachment(s).",
             title="Download",
             border_style="green",
-        )
+        ),
+        level="summary",
     )
 
 
 async def _download_for_filtered_emails(handler: AttachmentHandler, emails: list[EmailModel]) -> None:
     if not emails:
-        console.print(
+        _console_print(
             Panel.fit(
                 "No emails matched the requested filters.",
                 title="Download",
                 border_style="yellow",
-            )
+            ),
+            level="summary",
         )
         return
 
@@ -448,13 +694,120 @@ async def _download_for_filtered_emails(handler: AttachmentHandler, emails: list
     for email in emails:
         total_paths.extend(await handler.download_all_for_email(email.id))
 
-    console.print(
+    _console_print(
         Panel.fit(
             f"✓ Downloaded {len(total_paths)} attachment(s) from {len(emails)} email(s).",
             title="Download",
             border_style="green",
-        )
+        ),
+        level="summary",
     )
+
+
+def _build_local_filters(
+    *,
+    from_address: Optional[str],
+    subject: Optional[str],
+    after: Optional[str],
+    before: Optional[str],
+    unread: bool,
+    read: bool,
+    has_attachments: bool,
+) -> tuple[EmailSearchFilters, bool]:
+    sender = _normalize_text_filter(from_address, "Sender")
+    subject_value = _normalize_text_filter(subject, "Subject")
+    date_from = _parse_date_input(after, "after") if after is not None else None
+    date_to = _parse_date_input(before, "before") if before is not None else None
+    if date_from and date_to and date_from > date_to:
+        raise typer.BadParameter("--after must be before or equal to --before.")
+
+    is_read = _resolve_read_value(read, unread)
+    attachments_value = True if has_attachments else None
+    has_conditions = any(
+        [
+            sender is not None,
+            subject_value is not None,
+            date_from is not None,
+            date_to is not None,
+            is_read is not None,
+            attachments_value is not None,
+        ]
+    )
+
+    return (
+        EmailSearchFilters(
+            sender=sender,
+            subject=subject_value,
+            date_from=date_from,
+            date_to=date_to,
+            is_read=is_read,
+            has_attachments=attachments_value,
+        ),
+        has_conditions,
+    )
+
+
+def _normalize_text_filter(value: Optional[str], label: str) -> Optional[str]:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    if not trimmed:
+        raise typer.BadParameter(f"{label} filter cannot be empty.")
+    return trimmed
+
+
+def _resolve_read_value(read: bool, unread: bool) -> Optional[bool]:
+    if read and unread:
+        raise typer.BadParameter("Choose only one of --read or --unread.")
+    if read:
+        return True
+    if unread:
+        return False
+    return None
+
+
+def _apply_offset_limit(
+    emails: list[EmailModel],
+    *,
+    limit: Optional[int],
+    offset: int,
+) -> list[EmailModel]:
+    if offset:
+        emails = emails[offset:]
+    if limit is not None:
+        emails = emails[:limit]
+    return emails
+
+
+def _normalize_export_format(value: str) -> str:
+    lowered = value.lower()
+    if lowered not in SUPPORTED_FORMATS:
+        raise typer.BadParameter(f"Unsupported export format: {value}")
+    return lowered
+
+
+async def _get_email_count(session: AsyncSession) -> int:
+    result = await session.execute(select(func.count()).select_from(EmailModel))
+    return int(result.scalar() or 0)
+
+
+def _format_database_label(database_url: str, email_count: int) -> str:
+    if database_url.startswith("sqlite:///"):
+        db_path = database_url.replace("sqlite:///", "")
+        return f"{Path(db_path).expanduser()} ({email_count} emails)"
+    return f"{database_url} ({email_count} emails)"
+
+
+def _get_attachment_stats(attachments_dir: Path) -> tuple[int, int]:
+    if not attachments_dir.exists():
+        return (0, 0)
+    count = 0
+    size = 0
+    for path in attachments_dir.rglob("*"):
+        if path.is_file():
+            count += 1
+            size += path.stat().st_size
+    return count, size
 
 
 def _build_email_filter(
@@ -549,26 +902,6 @@ def _parse_date_input(value: str, label: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
-
-
-def _render_email_table(emails: list[Email], folder: str) -> None:
-    """Render fetched emails in a readable table."""
-    table = Table(title=f"Emails in {folder}")
-    table.add_column("Received", style="cyan")
-    table.add_column("From", style="magenta")
-    table.add_column("Subject", style="white")
-    table.add_column("Read", justify="center")
-    table.add_column("Attachments", justify="center")
-
-    for email in emails:
-        sender = email.sender.name or email.sender.address
-        received = email.received_at.strftime("%Y-%m-%d %H:%M")
-        subject = email.subject or "(no subject)"
-        is_read = "yes" if email.is_read else "no"
-        has_attachments = "yes" if email.has_attachments else "no"
-        table.add_row(received, sender, subject, is_read, has_attachments)
-
-    console.print(table)
 
 
 def main() -> None:

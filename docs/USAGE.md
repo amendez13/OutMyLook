@@ -14,6 +14,15 @@ python -m src.main login
 python -m src.main fetch --folder inbox --limit 10
 ```
 
+## Global Flags
+
+The CLI supports global output controls that apply to all commands:
+
+- `--verbose`: Enable debug logging and show more detail in command output.
+- `--quiet`: Suppress non-essential output and show only errors or summaries.
+
+Only one of `--verbose` or `--quiet` can be used at a time.
+
 ## Authentication Commands
 
 ### Login
@@ -37,8 +46,16 @@ refreshed automatically before expiry.
 python -m src.main status
 ```
 
-Shows the current token status, remaining lifetime, and granted scopes. If the
-token is close to expiring, the CLI warns that it will refresh on the next use.
+Shows authentication, database, and attachment storage status. Example output:
+
+```
+Authentication: Logged in as user@outlook.com
+Token expires: 2025-01-15 14:30:00
+Database: ~/.outmylook/emails.db (1,234 emails)
+Attachments: ~/.outmylook/attachments (56 files, 128 MB)
+```
+
+If the token is close to expiring, the CLI warns that it will refresh on the next use.
 
 ### Logout
 
@@ -116,6 +133,45 @@ python -m src.main fetch --from "boss@company.com" --subject "invoice" --has-att
 ```
 
 See `docs/DATABASE.md` for schema details and migration commands.
+
+## Listing Stored Emails
+
+Use `list` to query the local database without calling Microsoft Graph.
+
+```bash
+# List all stored emails
+python -m src.main list
+
+# List with filters
+python -m src.main list --from "amazon.com"
+python -m src.main list --subject "order"
+python -m src.main list --after 2025-01-01
+
+# Pagination
+python -m src.main list --limit 50 --offset 100
+```
+
+The table includes the Graph message ID, sender, subject, received time,
+and attachment status.
+
+## Exporting Stored Emails
+
+Use `export` to write stored emails to JSON or CSV.
+
+```bash
+# Export to JSON
+python -m src.main export emails.json --format json
+
+# Export to CSV
+python -m src.main export emails.csv --format csv
+
+# Export with filters
+python -m src.main export orders.json --from "amazon.com" --format json
+```
+
+Notes:
+- Filters behave the same as `list` and are applied to the local database.
+- When exporting CSV with zero records, the file still includes header columns.
 
 ### Attachment downloads
 

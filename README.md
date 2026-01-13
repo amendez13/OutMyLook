@@ -11,6 +11,7 @@ A Python application for managing Microsoft Outlook emails using the Microsoft G
 - **OAuth2 Authentication**: Secure authentication with Microsoft Graph using Device Code Flow
 - **Token Caching**: Persistent token storage for seamless re-authentication
 - **CLI Interface**: User-friendly command-line interface for email management
+- **Local Querying & Export**: List stored emails and export to JSON/CSV
 - **Automatic Token Refresh**: Tokens automatically refreshed before expiration
 - **Persistent Database Storage**: Fetch results are stored locally for later querying
 - **Attachment Downloads**: Download and track email attachments locally
@@ -75,12 +76,15 @@ The login command will display a URL and device code. Visit the URL in your brow
 
 ```bash
 python -m src.main fetch --limit 10 --folder inbox  # Fetch emails
-# python -m src.main download <email_id>            # Download attachments
-# python -m src.main search   # Search emails
+python -m src.main list                              # List stored emails
+python -m src.main export emails.json --format json  # Export emails
+python -m src.main download <email_id>               # Download attachments
 ```
 
+Use `--verbose` for detailed logs or `--quiet` for summary-only output.
+
 See `docs/USAGE.md` for a full usage guide, including configuration tips, folder selection, pagination,
-and database storage details.
+local database querying/export, and attachment downloads.
 
 ## Configuration
 
