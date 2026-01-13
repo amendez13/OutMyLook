@@ -254,6 +254,7 @@ async def _status_async() -> None:
     try:
         settings = get_settings()
         _setup_logging(settings)
+        settings.ensure_directories()
         token_cache = TokenCache(settings.storage.token_file)
 
         auth_lines: list[tuple[str, str]] = []
