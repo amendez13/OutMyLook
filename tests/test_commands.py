@@ -41,6 +41,8 @@ def test_status_not_authenticated() -> None:
     with (
         patch("src.cli.commands.get_settings", return_value=make_settings()),
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
+        patch("src.cli.commands._get_email_count", new=AsyncMock(return_value=0)),
         patch("src.cli.commands.console") as mock_console,
     ):
         # Call the command which uses asyncio.run internally
@@ -67,6 +69,8 @@ def test_status_authenticated_shows_token_info() -> None:
     with (
         patch("src.cli.commands.get_settings", return_value=make_settings()),
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
+        patch("src.cli.commands._get_email_count", new=AsyncMock(return_value=0)),
         patch("src.cli.commands.console") as mock_console,
     ):
         commands.status()
@@ -78,8 +82,7 @@ def test_status_authenticated_shows_token_info() -> None:
         last_call = mock_console.print.call_args_list[-1][0]
         arg = last_call[0] if last_call else None
         if isinstance(arg, Panel):
-            # Panel title is set to "Authentication Status" in the implementation
-            assert arg.title == "Authentication Status" or "Authenticated" in str(arg.renderable)
+            assert arg.title == "Status" or "Authenticated" in str(arg.renderable)
         else:
             # join string representations of arguments to check content
             joined = " ".join(str(a) for a in last_call)
@@ -215,13 +218,14 @@ def test_status_token_info_unavailable() -> None:
     with (
         patch("src.cli.commands.get_settings", return_value=make_settings()),
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
+        patch("src.cli.commands._get_email_count", new=AsyncMock(return_value=0)),
         patch("src.cli.commands.console") as mock_console,
     ):
         commands.status()
         last_call = mock_console.print.call_args_list[-1][0]
         arg = last_call[0] if last_call else None
-        # Panel with title "Authentication Status" is used for this case
-        assert getattr(arg, "title", None) == "Authentication Status"
+        assert getattr(arg, "title", None) == "Status"
 
 
 def test_status_expiring_soon_shows_note() -> None:
@@ -241,6 +245,8 @@ def test_status_expiring_soon_shows_note() -> None:
     with (
         patch("src.cli.commands.get_settings", return_value=make_settings()),
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
+        patch("src.cli.commands._get_email_count", new=AsyncMock(return_value=0)),
         patch("src.cli.commands.console") as mock_console,
     ):
         commands.status()
@@ -341,6 +347,75 @@ def test_fetch_success_renders_table() -> None:
         mock_console.print.assert_called()
 
 
+def test_fetch_quiet_summary() -> None:
+    """Fetch should print a summary in quiet mode."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    email = Email(
+        id="msg-1",
+        subject="Subject",
+        sender=EmailAddress(address="alice@example.com", name="Alice"),
+        received_at=datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc),
+        body_preview="Preview",
+        body_content=None,
+        is_read=False,
+        has_attachments=False,
+        folder_id="inbox",
+    )
+
+    commands._configure_output(verbose=False, quiet=True)
+    try:
+        with (
+            patch("src.cli.commands.get_settings", return_value=make_settings()),
+            patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+            patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+            patch("src.cli.commands.EmailClient", autospec=True) as mock_email_client,
+            patch("src.cli.commands.get_session", return_value=fake_session_context()),
+            patch("src.cli.commands.console") as mock_console,
+            patch("src.cli.commands.build_email_table") as mock_table,
+        ):
+            mock_graph_auth.from_settings.return_value = fake_authenticator
+            mock_email_client_instance = MagicMock()
+            mock_email_client_instance.list_emails = AsyncMock(return_value=[email])
+            mock_email_client.return_value = mock_email_client_instance
+
+            commands.fetch(limit=1, folder="inbox", skip=0)
+
+            mock_table.assert_not_called()
+            mock_console.print.assert_called()
+    finally:
+        commands._configure_output(verbose=False, quiet=False)
+
+
+def test_fetch_unexpected_error_exits() -> None:
+    """Fetch should exit on unexpected errors."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailClient", autospec=True) as mock_email_client,
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
+        patch("src.cli.commands.console"),
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+        mock_email_client_instance = MagicMock()
+        mock_email_client_instance.list_emails = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_email_client.return_value = mock_email_client_instance
+
+        with pytest.raises(typer.Exit):
+            commands.fetch(limit=1, folder="inbox", skip=0)
+
+
 def test_fetch_empty_folder() -> None:
     """Fetch should handle empty folders gracefully."""
     mock_token_cache = MagicMock()
@@ -421,6 +496,54 @@ def test_download_specific_attachment() -> None:
         mock_console.print.assert_called()
 
 
+def test_download_authentication_error_exits() -> None:
+    """download should exit on authentication errors."""
+    mock_token_cache = MagicMock()
+
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(side_effect=AuthenticationError("auth failed"))
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.console"),
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+
+        with pytest.raises(typer.Exit):
+            commands.download(email_id="email-1")
+
+
+def test_download_no_attachments() -> None:
+    """download should report when no attachments are found for an email."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    handler_instance = MagicMock()
+    handler_instance.download_all_for_email = AsyncMock(return_value=[])
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailRepository", autospec=True),
+        patch("src.cli.commands.AttachmentRepository", autospec=True),
+        patch("src.cli.commands.AttachmentHandler", return_value=handler_instance),
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+
+        commands.download(email_id="email-1")
+
+        handler_instance.download_all_for_email.assert_awaited_once_with("email-1")
+        mock_console.print.assert_called()
+
+
 def test_download_filters_unread_with_attachments() -> None:
     """download should call download_all_for_email for filtered emails."""
     mock_token_cache = MagicMock()
@@ -457,6 +580,39 @@ def test_download_filters_unread_with_attachments() -> None:
         email_repo_instance.search.assert_awaited_once_with(is_read=False, has_attachments=True)
         handler_instance.download_all_for_email.assert_any_await("email-1")
         handler_instance.download_all_for_email.assert_any_await("email-2")
+        mock_console.print.assert_called()
+
+
+def test_download_filters_no_matches() -> None:
+    """download should report when no emails match filters."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    email_repo_instance = MagicMock()
+    email_repo_instance.search = AsyncMock(return_value=[])
+
+    handler_instance = MagicMock()
+    handler_instance.download_all_for_email = AsyncMock(return_value=[])
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailRepository", return_value=email_repo_instance),
+        patch("src.cli.commands.AttachmentRepository", autospec=True),
+        patch("src.cli.commands.AttachmentHandler", return_value=handler_instance),
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+
+        commands.download(unread=True, has_attachments=True)
+
+        email_repo_instance.search.assert_awaited_once_with(is_read=False, has_attachments=True)
+        handler_instance.download_all_for_email.assert_not_called()
         mock_console.print.assert_called()
 
 

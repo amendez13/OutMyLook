@@ -63,13 +63,16 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 **Purpose**: Provides command-line interface for user interactions
 
 **Responsibilities**:
-- Handle user commands (login, logout, status, fetch)
+- Handle user commands (login, logout, status, fetch, list, export, download)
 - Display authentication status and messages
 - Provide interactive prompts and feedback
-- Render fetched email data in a readable format
+- Render fetched/stored email data in a readable format
+- Export stored data to JSON/CSV
 
 **Key Files**:
 - `src/cli/commands.py` - CLI commands using Typer
+- `src/cli/formatters.py` - Rich formatters for tables and status output
+- `src/cli/exporters.py` - JSON/CSV export helpers
 - `src/cli/__init__.py` - Module exports
 - `src/main.py` - Main entry point that invokes the CLI
 
@@ -78,6 +81,9 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 - `logout` - Clear authentication tokens
 - `status` - Check authentication status
 - `fetch` - Fetch emails from a mail folder
+- `list` - Query stored emails in the local database
+- `export` - Export stored emails to JSON or CSV
+- `download` - Download attachments for stored emails
 
 ### Email Module
 

@@ -97,10 +97,19 @@ class EmailRepository:
         result = await self.session.scalars(select(EmailModel).where(EmailModel.id == email_id))
         return cast(Optional[EmailModel], result.one_or_none())
 
-    async def list_all(self, limit: int = 100, offset: int = 0, order_by: str = "received_at") -> list[EmailModel]:
+    async def list_all(
+        self,
+        limit: Optional[int] = 100,
+        offset: int = 0,
+        order_by: str = "received_at",
+    ) -> list[EmailModel]:
         """List stored emails."""
         order_column = _resolve_order_column(order_by)
-        stmt = select(EmailModel).order_by(order_column).offset(offset).limit(limit)
+        stmt = select(EmailModel).order_by(order_column)
+        if offset:
+            stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars())
 
