@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from src.database.repository import EmailRepository, init_db
+from src.attachments.models import Attachment
+from src.database.repository import AttachmentRepository, EmailRepository, init_db
 from src.email.models import Email, EmailAddress
 
 
@@ -17,6 +18,8 @@ def make_email(
     sender_email: str = "alice@example.com",
     sender_name: str = "Alice",
     received_at: datetime | None = None,
+    is_read: bool = False,
+    has_attachments: bool = False,
 ) -> Email:
     if received_at is None:
         received_at = datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc)
@@ -27,8 +30,8 @@ def make_email(
         received_at=received_at,
         body_preview="Preview",
         body_content="Body",
-        is_read=False,
-        has_attachments=False,
+        is_read=is_read,
+        has_attachments=has_attachments,
         folder_id="inbox",
     )
 
@@ -142,14 +145,29 @@ async def test_search_filters(session) -> None:
     """search should filter by sender, subject, and date range."""
     repo = EmailRepository(session)
     base_time = datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc)
-    early = make_email("id-7", sender_email="boss@company.com", subject="Invoice", received_at=base_time)
+    early = make_email(
+        "id-7",
+        sender_email="boss@company.com",
+        subject="Invoice",
+        received_at=base_time,
+        is_read=False,
+        has_attachments=True,
+    )
     later = make_email(
         "id-8",
         sender_email="friend@example.com",
         subject="Hello there",
         received_at=base_time + timedelta(days=2),
+        is_read=True,
+        has_attachments=False,
     )
-    null_subject = make_email("id-9", subject=None, received_at=base_time + timedelta(days=1))
+    null_subject = make_email(
+        "id-9",
+        subject=None,
+        received_at=base_time + timedelta(days=1),
+        is_read=False,
+        has_attachments=False,
+    )
     await repo.save_many([early, later, null_subject])
 
     sender_results = await repo.search(sender="boss@company.com")
@@ -164,6 +182,12 @@ async def test_search_filters(session) -> None:
     to_results = await repo.search(date_to=base_time + timedelta(days=1))
     assert [email.id for email in to_results] == ["id-7", "id-9"]
 
+    unread_results = await repo.search(is_read=False)
+    assert [email.id for email in unread_results] == ["id-7", "id-9"]
+
+    attachments_results = await repo.search(has_attachments=True)
+    assert [email.id for email in attachments_results] == ["id-7"]
+
 
 @pytest.mark.asyncio
 async def test_fetch_existing_empty(session) -> None:
@@ -173,3 +197,39 @@ async def test_fetch_existing_empty(session) -> None:
     result = await repo._fetch_existing([])
 
     assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_attachment_repository_save_and_list(session) -> None:
+    """save_metadata should store attachments and list_for_email should retrieve them."""
+    repo = AttachmentRepository(session)
+    attachments = [Attachment(id="att-1", name="file.txt", content_type="text/plain", size=12)]
+
+    saved = await repo.save_metadata("email-1", attachments)
+
+    assert len(saved) == 1
+    listed = await repo.list_for_email("email-1")
+    assert [attachment.id for attachment in listed] == ["att-1"]
+
+
+@pytest.mark.asyncio
+async def test_attachment_repository_updates_existing(session) -> None:
+    """save_metadata should update existing attachment metadata."""
+    repo = AttachmentRepository(session)
+    await repo.save_metadata("email-1", [Attachment(id="att-2", name="old.txt", content_type=None, size=1)])
+
+    updated = await repo.save_metadata("email-1", [Attachment(id="att-2", name="new.txt", content_type=None, size=5)])
+
+    assert updated[0].name == "new.txt"
+
+
+@pytest.mark.asyncio
+async def test_attachment_repository_mark_downloaded(session) -> None:
+    """mark_downloaded should persist local path and timestamp."""
+    repo = AttachmentRepository(session)
+    await repo.save_metadata("email-1", [Attachment(id="att-3", name="file.txt", content_type=None, size=1)])
+
+    downloaded = await repo.mark_downloaded("att-3", "/tmp/file.txt", datetime.now(timezone.utc))
+
+    assert downloaded is not None
+    assert downloaded.local_path == "/tmp/file.txt"

@@ -103,6 +103,26 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
    - Normalize Graph fields (e.g., `receivedDateTime`, `bodyPreview`)
    - Validate required values and provide consistent typing
 
+### Attachment Module
+
+**Purpose**: Download and track message attachments.
+
+**Responsibilities**:
+- List and download attachments via Microsoft Graph
+- Store files in the configured attachments directory
+- Persist attachment metadata and download status
+
+**Key Files**:
+- `src/attachments/handler.py` - AttachmentHandler for listing and downloads
+- `src/attachments/models.py` - Attachment metadata model
+
+**Key Classes**:
+
+1. **AttachmentHandler**
+   - `list_attachments()` - List attachment metadata
+   - `download_attachment()` - Download a single attachment
+   - `download_all_for_email()` - Download all attachments for an email
+
 ### Database Module
 
 **Purpose**: Persist fetched emails for local querying and historical access.
@@ -192,6 +212,18 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
    - Existing rows are updated to reflect new metadata
 7. **CLI Output**:
    - The CLI renders a table of received time, sender, subject, and flags
+
+### Attachment Download Flow
+
+1. **Download Request**:
+   - User runs `python -m src.main download <email_id>` or a filter-based command
+2. **Attachment Listing**:
+   - AttachmentHandler lists attachments for the email
+3. **Download**:
+   - Files are downloaded to `storage.attachments_dir/<email_id>/`
+   - Filename conflicts are resolved with numeric suffixes
+4. **Metadata Update**:
+   - AttachmentRepository stores metadata and marks downloads with local paths
 
 ## Design Decisions
 

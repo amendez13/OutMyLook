@@ -13,6 +13,7 @@ A Python application for managing Microsoft Outlook emails using the Microsoft G
 - **CLI Interface**: User-friendly command-line interface for email management
 - **Automatic Token Refresh**: Tokens automatically refreshed before expiration
 - **Persistent Database Storage**: Fetch results are stored locally for later querying
+- **Attachment Downloads**: Download and track email attachments locally
 
 ## Quick Start
 
@@ -74,6 +75,7 @@ The login command will display a URL and device code. Visit the URL in your brow
 
 ```bash
 python -m src.main fetch --limit 10 --folder inbox  # Fetch emails
+# python -m src.main download <email_id>            # Download attachments
 # python -m src.main search   # Search emails
 ```
 

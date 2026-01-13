@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import date, datetime, time, timezone
+from pathlib import Path
 from typing import Annotated, Callable, Optional
 
 import typer
@@ -11,9 +12,10 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from src.attachments import AttachmentHandler
 from src.auth import AuthenticationError, GraphAuthenticator, TokenCache
 from src.config.settings import get_settings
-from src.database.repository import EmailRepository, get_session
+from src.database.repository import AttachmentRepository, EmailRepository, get_session
 from src.email import Email, EmailClient, EmailFilter
 
 app = typer.Typer(help="OutMyLook - Microsoft Outlook email management tool")
@@ -315,6 +317,143 @@ async def _fetch_async(folder: str, limit: int, skip: int, email_filter: Optiona
             )
         )
         raise typer.Exit(code=1)
+
+
+@app.command()
+def download(
+    email_id: Annotated[Optional[str], typer.Argument(None, help="Email ID to download attachments from")] = None,
+    attachment_id: Annotated[
+        Optional[str], typer.Option("--attachment", "-a", help="Specific attachment ID to download")
+    ] = None,
+    unread: Annotated[bool, typer.Option("--unread", help="Download attachments for unread emails")] = False,
+    has_attachments: Annotated[
+        bool, typer.Option("--has-attachments", help="Download attachments for emails with attachments")
+    ] = False,
+) -> None:
+    """Download attachments from Microsoft Graph."""
+    asyncio.run(_download_async(email_id, attachment_id, unread, has_attachments))
+
+
+async def _download_async(
+    email_id: Optional[str],
+    attachment_id: Optional[str],
+    unread: bool,
+    has_attachments: bool,
+) -> None:
+    """Async implementation of download command."""
+    try:
+        settings = get_settings()
+        settings.setup_logging()
+        settings.ensure_directories()
+
+        if attachment_id and not email_id:
+            raise typer.BadParameter("--attachment requires an email_id argument.")
+        if not email_id and not (unread or has_attachments):
+            raise typer.BadParameter("Provide an email_id or filters like --unread/--has-attachments.")
+
+        token_cache = TokenCache(settings.storage.token_file)
+        authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
+        graph_client = await authenticator.get_client()
+
+        async with get_session(settings.database.url) as session:
+            email_repo = EmailRepository(session)
+            attachment_repo = AttachmentRepository(session)
+            handler = AttachmentHandler(
+                graph_client,
+                Path(settings.storage.attachments_dir),
+                attachment_repo,
+            )
+
+            if email_id:
+                await _download_for_single_email(handler, email_id, attachment_id)
+                return
+
+            is_read = None if not unread else False
+            attachments_filter = None if not has_attachments else True
+            emails = await email_repo.search(is_read=is_read, has_attachments=attachments_filter)
+            await _download_for_filtered_emails(handler, emails)
+
+    except AuthenticationError as e:
+        console.print(
+            Panel.fit(
+                f"Authentication failed\n\n{str(e)}\n\nRun 'outmylook login' to authenticate.",
+                title="Authentication Required",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        logger.exception("Download failed")
+        console.print(
+            Panel.fit(
+                f"Error downloading attachments\n\n{str(e)}",
+                title="Error",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
+
+
+async def _download_for_single_email(
+    handler: AttachmentHandler,
+    email_id: str,
+    attachment_id: Optional[str],
+) -> None:
+    if attachment_id:
+        path = await handler.download_attachment(email_id, attachment_id)
+        console.print(
+            Panel.fit(
+                f"✓ Downloaded attachment to:\n{path}",
+                title="Download",
+                border_style="green",
+            )
+        )
+        return
+
+    paths = await handler.download_all_for_email(email_id)
+    if not paths:
+        console.print(
+            Panel.fit(
+                f"No attachments found for email '{email_id}'.",
+                title="Download",
+                border_style="yellow",
+            )
+        )
+        return
+
+    console.print(
+        Panel.fit(
+            f"✓ Downloaded {len(paths)} attachment(s).",
+            title="Download",
+            border_style="green",
+        )
+    )
+
+
+async def _download_for_filtered_emails(handler: AttachmentHandler, emails) -> None:
+    if not emails:
+        console.print(
+            Panel.fit(
+                "No emails matched the requested filters.",
+                title="Download",
+                border_style="yellow",
+            )
+        )
+        return
+
+    total_paths: list[Path] = []
+    for email in emails:
+        total_paths.extend(await handler.download_all_for_email(email.id))
+
+    console.print(
+        Panel.fit(
+            f"✓ Downloaded {len(total_paths)} attachment(s) from {len(emails)} email(s).",
+            title="Download",
+            border_style="green",
+        )
+    )
 
 
 def _build_email_filter(

@@ -75,6 +75,9 @@ nano config/config.yaml
 # Or use your preferred editor
 ```
 
+Attachment storage is configured under `storage.attachments_dir`. The default
+path (`~/.outmylook/attachments`) is created automatically on first use.
+
 ### 6. Database Setup (Optional)
 
 OutMyLook stores fetched emails in a local database by default. For SQLite,

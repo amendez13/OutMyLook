@@ -69,6 +69,9 @@ Columns:
 Indexes:
 - `idx_attachments_email` on `email_id`
 
+The attachment download flow updates `local_path` and `downloaded_at` so the
+system can skip already-downloaded files.
+
 ## How Persistence Works
 
 When you run `fetch`, the CLI creates a database session and passes an
@@ -81,6 +84,10 @@ into `Email` models, the repository bulk-saves them:
 
 This flow keeps the database in sync with the latest Graph metadata without
 creating duplicates.
+
+When attachments are listed or downloaded, the attachment metadata is saved or
+updated in the `attachments` table. Downloads also update `local_path` and
+`downloaded_at` for tracking and deduplication.
 
 ## Configuration
 
