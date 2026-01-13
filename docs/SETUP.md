@@ -63,7 +63,37 @@ pre-commit install
 
 Pre-commit hooks will automatically run code quality checks before each commit.
 
-### 5. Configure the Application
+### 5. Azure App Registration (Microsoft Graph)
+
+OutMyLook uses Microsoft Graph with Device Code Flow. You need an Azure AD app
+registration to obtain a client ID. No client secret is required.
+
+1. Go to the Azure Portal: https://portal.azure.com
+2. Navigate to **Azure Active Directory** -> **App registrations** -> **New registration**.
+3. Fill out the form:
+   - **Name**: `OutMyLook` (or any name you prefer).
+   - **Supported account types**:
+     - Personal accounts: select **Accounts in any organizational directory and personal Microsoft accounts**.
+     - Org-only: select the appropriate single/multi-tenant option for your organization.
+   - **Redirect URI**: leave blank (Device Code Flow does not require it).
+4. Click **Register**.
+5. Copy the following values from the app overview:
+   - **Application (client) ID** -> use for `azure.client_id`
+   - **Directory (tenant) ID** -> use for `azure.tenant` (org accounts only)
+6. Configure authentication:
+   - Go to **Authentication**.
+   - Under **Advanced settings**, enable **Allow public client flows**.
+7. Add Microsoft Graph permissions:
+   - Go to **API permissions** -> **Add a permission** -> **Microsoft Graph** -> **Delegated permissions**.
+   - Add: `Mail.Read`, `User.Read`, and `offline_access` (under OpenID permissions).
+   - If you're in an organization, click **Grant admin consent** if required.
+
+Notes:
+- If you only need read-only access to a subset of mail, adjust the scopes in `config/config.yaml`.
+- For personal Microsoft accounts, keep `azure.tenant` set to `common`.
+- For org-only access, set `azure.tenant` to your directory (tenant) ID.
+
+### 6. Configure the Application
 
 ```bash
 # Copy example configuration
@@ -78,7 +108,7 @@ nano config/config.yaml
 Attachment storage is configured under `storage.attachments_dir`. The default
 path (`~/.outmylook/attachments`) is created automatically on first use.
 
-### 6. Database Setup (Optional)
+### 7. Database Setup (Optional)
 
 OutMyLook stores fetched emails in a local database by default. For SQLite,
 no extra setup is required; the file is created on first use.
@@ -101,7 +131,7 @@ alembic upgrade head
 
 See `docs/DATABASE.md` for more detail.
 
-### 7. Verify Installation
+### 8. Verify Installation
 
 ```bash
 # Run tests to verify setup
@@ -198,6 +228,12 @@ pre-commit install
 **Configuration file not found**
 ```bash
 cp config/config.example.yaml config/config.yaml
+```
+
+**Login output is noisy (HTTP polling spam)**
+Set `logging.level` to `WARNING` in `config/config.yaml` or run:
+```bash
+LOGGING_LEVEL=WARNING python -m src.main login
 ```
 
 ### Getting Help

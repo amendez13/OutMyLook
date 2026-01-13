@@ -108,6 +108,17 @@ class CachedTokenCredential(TokenCredential):
         Returns:
             An AccessToken with the token string and expiration time
         """
+        if self._token_cache and self._token_cache.has_valid_token():
+            token_data = self._token_cache.load_token_sync()
+            if token_data:
+                cached_scopes = set(token_data.get("scopes") or [])
+                requested_scopes = set(scopes)
+                access_token = token_data.get("access_token")
+                expires_on = token_data.get("expires_on")
+                if access_token and expires_on and requested_scopes.issubset(cached_scopes):
+                    logger.debug("Using cached access token from TokenCache")
+                    return AccessToken(access_token, expires_on)
+
         # Use Azure SDK's credential which handles caching and refresh
         credential = self._get_device_code_credential()
 
@@ -131,16 +142,15 @@ class CachedTokenCredential(TokenCredential):
             return
 
         try:
-            # Try to run save_token on the event loop. If run_until_complete
-            # raises a RuntimeError (e.g., when the loop is already running),
-            # fall back to asyncio.run.
             try:
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(self._token_cache.save_token(token.token, token.expires_on, scopes))
+                loop = asyncio.get_running_loop()
             except RuntimeError:
                 asyncio.run(self._token_cache.save_token(token.token, token.expires_on, scopes))
+                logger.debug("Token cached successfully")
+                return
 
-            logger.debug("Token cached successfully")
+            loop.create_task(self._token_cache.save_token(token.token, token.expires_on, scopes))
+            logger.debug("Scheduled token cache update")
         except Exception as exc:
             # Don't fail authentication flow if caching fails; just log it.
             logger.debug("Failed to save token to cache: %s", exc)

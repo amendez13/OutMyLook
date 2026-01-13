@@ -21,7 +21,7 @@ A Python application for managing Microsoft Outlook emails using the Microsoft G
 - Python 3.10 or higher
 - pip (Python package installer)
 - Microsoft account (@outlook.com, @hotmail.com, @live.com, or organizational account)
-- Azure AD application registration (see [Setup Guide](docs/SETUP.md))
+- Azure AD application registration (see [Setup Guide](docs/SETUP.md) for step-by-step Azure setup)
 
 ## Installation
 
@@ -50,6 +50,9 @@ pip install -r requirements.txt
 cp config/config.example.yaml config/config.yaml
 # Edit config/config.yaml with your settings
 ```
+
+For a full Azure app registration walkthrough (Device Code Flow, permissions, and public client flows),
+see [docs/SETUP.md](docs/SETUP.md).
 
 ## Quick Start
 
@@ -173,6 +176,7 @@ For database setup and migrations, see [Database Guide](docs/DATABASE.md).
 
 - **Authentication fails or client_id missing**: Ensure `azure.client_id` is set in `config/config.yaml` or `AZURE_CLIENT_ID` is exported.
 - **Device code flow never completes**: Confirm the account used to sign in has granted consent to the app registration.
+- **Login output is noisy (HTTP polling spam)**: Set `logging.level` to `WARNING` in `config/config.yaml` or run with `LOGGING_LEVEL=WARNING`, then retry `login`.
 - **Token cache is stale**: Delete the file at `storage.token_file` and re-run `login`.
 - **SQLite database is locked**: Make sure no other process is using the DB; restart any running fetch/list/export commands.
 - **Attachments not downloading**: Confirm the `Mail.Read` scope is present and the email actually has attachments.
