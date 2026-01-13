@@ -34,11 +34,12 @@ python -m src.main login
 What happens:
 - The CLI prints a URL and a device code.
 - Open the URL in a browser and enter the code.
-- A token is cached locally for future use.
+- MSAL caches tokens and OutMyLook stores a non-secret auth record for reuse.
 
-Tokens are stored at the path configured in `storage.token_file` (default:
-`~/.outmylook/tokens.json`). The cache is used for subsequent commands and
-refreshed automatically before expiry.
+Authentication is reused via MSAL's persistent cache and a local auth record
+stored at `~/.outmylook/auth_record.json`. The `storage.token_file` JSON (default
+`~/.outmylook/tokens.json`) is informational for status/troubleshooting and not
+used for authentication.
 
 ### Status
 
@@ -63,7 +64,8 @@ If the token is close to expiring, the CLI warns that it will refresh on the nex
 python -m src.main logout
 ```
 
-Clears the cached token so the next command will require re-authentication.
+Clears the auth record and cached token metadata so the next command will
+require re-authentication.
 
 ## Fetching Email
 
@@ -237,7 +239,7 @@ Required values:
 Optional values:
 - `azure.tenant`: Use `common` for personal accounts, or your tenant ID.
 - `azure.scopes`: Graph API scopes (defaults are set in `config/config.example.yaml`).
-- `storage.token_file`: Token cache path.
+- `storage.token_file`: Informational token cache path (used for status output).
 
 ## Troubleshooting
 

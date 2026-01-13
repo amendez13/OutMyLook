@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from azure.core.credentials import AccessToken, TokenCredential
-from azure.identity import DeviceCodeCredential, TokenCachePersistenceOptions
+from azure.identity import AuthenticationRecord, DeviceCodeCredential, TokenCachePersistenceOptions
 from msgraph import GraphServiceClient
 
 from src.auth.token_cache import TokenCache
@@ -35,6 +35,7 @@ class CachedTokenCredential(TokenCredential):
         tenant_id: str,
         token_cache: Optional[TokenCache] = None,
         cache_dir: Optional[Path] = None,
+        auth_record_file: Optional[Path] = None,
     ):
         """Initialize the CachedTokenCredential.
 
@@ -43,11 +44,14 @@ class CachedTokenCredential(TokenCredential):
             tenant_id: Azure AD tenant ID
             token_cache: Optional token cache for access token tracking
             cache_dir: Directory for MSAL token cache (defaults to token_cache dir)
+            auth_record_file: File path for persisted authentication record
         """
         self._client_id = client_id
         self._tenant_id = tenant_id
         self._token_cache = token_cache
         self._device_code_credential: Optional[DeviceCodeCredential] = None
+        self._auth_record_file = auth_record_file
+        self._auth_record: Optional[AuthenticationRecord] = None
 
         # Determine cache directory for MSAL token cache
         if cache_dir:
@@ -58,6 +62,9 @@ class CachedTokenCredential(TokenCredential):
             self._cache_dir = Path.home() / ".outmylook"
 
         self._cache_dir.mkdir(parents=True, exist_ok=True)
+        if self._auth_record_file is None:
+            self._auth_record_file = self._cache_dir / "auth_record.json"
+        self._auth_record = self._load_auth_record()
 
     def _get_device_code_credential(self) -> DeviceCodeCredential:
         """Get or create the DeviceCodeCredential with persistent cache.
@@ -78,6 +85,7 @@ class CachedTokenCredential(TokenCredential):
                 client_id=self._client_id,
                 tenant_id=self._tenant_id,
                 cache_persistence_options=cache_options,
+                authentication_record=self._auth_record,
             )
             logger.debug("Created DeviceCodeCredential with persistent token cache")
 
@@ -108,22 +116,13 @@ class CachedTokenCredential(TokenCredential):
         Returns:
             An AccessToken with the token string and expiration time
         """
-        if self._token_cache and self._token_cache.has_valid_token():
-            token_data = self._token_cache.load_token_sync()
-            if token_data:
-                cached_scopes = set(token_data.get("scopes") or [])
-                requested_scopes = set(scopes)
-                access_token = token_data.get("access_token")
-                expires_on = token_data.get("expires_on")
-                if access_token and expires_on and requested_scopes.issubset(cached_scopes):
-                    logger.debug("Using cached access token from TokenCache")
-                    return AccessToken(access_token, expires_on)
-
         # Use Azure SDK's credential which handles caching and refresh
         credential = self._get_device_code_credential()
 
         logger.debug("Requesting token from Azure SDK (will use cache/refresh if available)")
         token = credential.get_token(*scopes, claims=claims, tenant_id=tenant_id, enable_cae=enable_cae, **kwargs)
+
+        self._persist_auth_record(credential)
 
         # Update our token cache for quick access checks
         if self._token_cache:
@@ -154,6 +153,33 @@ class CachedTokenCredential(TokenCredential):
         except Exception as exc:
             # Don't fail authentication flow if caching fails; just log it.
             logger.debug("Failed to save token to cache: %s", exc)
+
+    def _load_auth_record(self) -> Optional[AuthenticationRecord]:
+        if self._auth_record_file is None or not self._auth_record_file.exists():
+            return None
+        try:
+            data = self._auth_record_file.read_text(encoding="utf-8")
+            return AuthenticationRecord.deserialize(data)
+        except Exception as exc:
+            logger.debug("Failed to load authentication record: %s", exc)
+            return None
+
+    def _persist_auth_record(self, credential: DeviceCodeCredential) -> None:
+        if self._auth_record_file is None:
+            return
+        auth_record = getattr(credential, "authentication_record", None)
+        if auth_record is None:
+            auth_record = getattr(credential, "_auth_record", None)
+        if not isinstance(auth_record, AuthenticationRecord):
+            return
+        if self._auth_record and auth_record.serialize() == self._auth_record.serialize():
+            return
+        try:
+            self._auth_record_file.parent.mkdir(parents=True, exist_ok=True)
+            self._auth_record_file.write_text(auth_record.serialize(), encoding="utf-8")
+            self._auth_record = auth_record
+        except Exception as exc:
+            logger.debug("Failed to persist authentication record: %s", exc)
 
     async def close(self) -> None:
         """Close the credential."""
@@ -299,6 +325,11 @@ class GraphAuthenticator:
             return False
         return self.token_cache.has_valid_token()
 
+    def _auth_record_path(self) -> Path:
+        if self.token_cache:
+            return Path(self.token_cache.token_file).expanduser().parent / "auth_record.json"
+        return Path.home() / ".outmylook" / "auth_record.json"
+
     async def get_client(self) -> GraphServiceClient:
         """Get authenticated Graph client.
 
@@ -360,6 +391,12 @@ class GraphAuthenticator:
 
         if self.token_cache:
             await self.token_cache.clear()
+        auth_record_file = self._auth_record_path()
+        if auth_record_file.exists():
+            try:
+                auth_record_file.unlink()
+            except Exception as exc:
+                logger.debug("Failed to remove auth record: %s", exc)
 
         self._credential = None
         self._client = None
