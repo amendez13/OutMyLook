@@ -218,8 +218,10 @@ async def _logout_async() -> None:
         settings.ensure_directories()
         logger.debug("Starting logout")
         token_cache = TokenCache(settings.storage.token_file)
+        auth_record_path = Path(settings.storage.token_file).expanduser().parent / "auth_record.json"
+        has_session = token_cache.has_valid_token() or auth_record_path.exists()
 
-        if not token_cache.has_valid_token():
+        if not has_session:
             _console_print(
                 Panel.fit(
                     "No active session found. You are not logged in.",
@@ -230,12 +232,12 @@ async def _logout_async() -> None:
             )
             return
 
-        # Clear the token
-        await token_cache.clear()
+        authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
+        await authenticator.logout()
 
         _console_print(
             Panel.fit(
-                "✓ Successfully logged out\n\nYour authentication token has been removed.",
+                "✓ Successfully logged out\n\nYour authentication data has been removed.",
                 title="Logout",
                 border_style="green",
             ),

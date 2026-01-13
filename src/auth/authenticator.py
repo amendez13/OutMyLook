@@ -167,7 +167,9 @@ class CachedTokenCredential(TokenCredential):
     def _persist_auth_record(self, credential: DeviceCodeCredential) -> None:
         if self._auth_record_file is None:
             return
-        auth_record = getattr(credential, "_auth_record", None)
+        auth_record = getattr(credential, "authentication_record", None)
+        if auth_record is None:
+            auth_record = getattr(credential, "_auth_record", None)
         if not isinstance(auth_record, AuthenticationRecord):
             return
         if self._auth_record and auth_record.serialize() == self._auth_record.serialize():

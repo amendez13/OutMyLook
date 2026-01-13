@@ -683,7 +683,7 @@ class TestCachedTokenCredential:
 
         mock_device_cred = Mock()
         mock_device_cred.get_token.return_value = Mock(token="new_token", expires_on=123456)
-        mock_device_cred._auth_record = auth_record
+        mock_device_cred.authentication_record = auth_record
 
         with patch.object(credential, "_get_device_code_credential", return_value=mock_device_cred):
             credential.get_token("scope1")

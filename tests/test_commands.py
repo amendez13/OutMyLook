@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -89,38 +90,41 @@ def test_status_authenticated_shows_token_info() -> None:
             assert "Authenticated" in joined or "Authentication Status" in joined
 
 
-def test_logout_no_active_session() -> None:
+def test_logout_no_active_session(tmp_path: Path) -> None:
     """Logout should inform when there is no active session and not raise."""
     mock_token_cache = MagicMock()
     mock_token_cache.has_valid_token.return_value = False
+    settings = make_settings(token_file=str(tmp_path / "token.json"))
 
     with (
-        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.get_settings", return_value=settings),
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator.from_settings") as mock_from_settings,
         patch("src.cli.commands.console") as mock_console,
     ):
         commands.logout()
 
+        mock_from_settings.assert_not_called()
         mock_console.print.assert_called()
 
 
-def test_logout_clears_token_when_present() -> None:
-    """When a token exists logout() should clear it and report success."""
+def test_logout_clears_token_when_present(tmp_path: Path) -> None:
+    """When a session exists logout() should clear it and report success."""
     mock_token_cache = MagicMock()
     mock_token_cache.has_valid_token.return_value = True
-    mock_token_cache.clear = AsyncMock()
+    mock_auth = MagicMock()
+    mock_auth.logout = AsyncMock()
+    settings = make_settings(token_file=str(tmp_path / "token.json"))
 
     with (
-        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.get_settings", return_value=settings),
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator.from_settings", return_value=mock_auth),
         patch("src.cli.commands.console") as mock_console,
     ):
         commands.logout()
 
-        # clear() should have been awaited
-        mock_token_cache.clear.assert_awaited()
-
-        # console.print should report successful logout
+        mock_auth.logout.assert_awaited()
         mock_console.print.assert_called()
 
 
@@ -254,15 +258,18 @@ def test_status_expiring_soon_shows_note() -> None:
         assert mock_console.print.call_count >= 2
 
 
-def test_logout_clear_raises_exit() -> None:
+def test_logout_clear_raises_exit(tmp_path: Path) -> None:
     """If clearing token fails during logout, logout should exit with an error."""
     mock_token_cache = MagicMock()
     mock_token_cache.has_valid_token.return_value = True
-    mock_token_cache.clear = AsyncMock(side_effect=Exception("boom"))
+    mock_auth = MagicMock()
+    mock_auth.logout = AsyncMock(side_effect=Exception("boom"))
+    settings = make_settings(token_file=str(tmp_path / "token.json"))
 
     with (
-        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.get_settings", return_value=settings),
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator.from_settings", return_value=mock_auth),
         patch("src.cli.commands.console") as mock_console,
     ):
         with pytest.raises(typer.Exit):
