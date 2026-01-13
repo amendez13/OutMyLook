@@ -546,6 +546,7 @@ class TestCachedTokenCredential:
         cache = Mock(spec=TokenCache)
         cache.has_valid_token.return_value = False
         cache.save_token = AsyncMock()
+        cache.load_token_sync.return_value = None
         # Add token_file attribute for cache_dir detection
         cache.token_file = tmp_path / "tokens.json"
         return cache
@@ -612,6 +613,22 @@ class TestCachedTokenCredential:
             mock_get_cred.assert_called_once()
             mock_device_cred.get_token.assert_called_once()
 
+    def test_get_token_uses_cached_token(self, credential: "CachedTokenCredential", mock_token_cache: Mock) -> None:
+        """Test get_token returns cached token when valid."""
+        mock_token_cache.has_valid_token.return_value = True
+        mock_token_cache.load_token_sync.return_value = {
+            "access_token": "cached_token",
+            "expires_on": 123456,
+            "scopes": ["scope1", "scope2"],
+        }
+
+        with patch.object(credential, "_get_device_code_credential") as mock_get_cred:
+            token = credential.get_token("scope1")
+
+        assert token.token == "cached_token"
+        assert token.expires_on == 123456
+        mock_get_cred.assert_not_called()
+
     def test_get_token_updates_local_cache(self, credential: "CachedTokenCredential") -> None:
         """Test get_token updates our local cache after getting token from SDK."""
         with patch.object(credential, "_get_device_code_credential") as mock_get_cred:
@@ -629,17 +646,17 @@ class TestCachedTokenCredential:
     def test_save_to_cache_with_event_loop(self, mock_asyncio: Mock, credential: "CachedTokenCredential") -> None:
         """Test _save_to_cache uses event loop when available."""
         mock_loop = Mock()
-        mock_asyncio.get_event_loop.return_value = mock_loop
+        mock_asyncio.get_running_loop.return_value = mock_loop
 
         token = Mock(token="new_token", expires_on=123456)
         credential._save_to_cache(token, ["scope1", "scope2"])
 
-        mock_loop.run_until_complete.assert_called_once()
+        mock_loop.create_task.assert_called_once()
 
     @patch("src.auth.authenticator.asyncio")
     def test_save_to_cache_without_event_loop(self, mock_asyncio: Mock, credential: "CachedTokenCredential") -> None:
         """Test _save_to_cache uses asyncio.run when no event loop."""
-        mock_asyncio.get_event_loop.side_effect = RuntimeError("No event loop")
+        mock_asyncio.get_running_loop.side_effect = RuntimeError("No event loop")
 
         token = Mock(token="new_token", expires_on=123456)
         credential._save_to_cache(token, ["scope1"])

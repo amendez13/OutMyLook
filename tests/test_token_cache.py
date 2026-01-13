@@ -78,6 +78,32 @@ def test_load_token_malformed_returns_none(tmp_path: Path) -> None:
     assert data is None
 
 
+def test_load_token_sync_missing_file_returns_none(tmp_path: Path) -> None:
+    """load_token_sync should return None when file is missing."""
+    token_file = tmp_path / "token.json"
+    cache = TokenCache(token_file)
+    assert cache.load_token_sync() is None
+
+
+def test_load_token_sync_reads_file(tmp_path: Path) -> None:
+    """load_token_sync should return token data when available."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text(json.dumps({"access_token": "x", "expires_on": _now_ts()}))
+    cache = TokenCache(token_file)
+    data = cache.load_token_sync()
+    assert data is not None
+    assert data["access_token"] == "x"
+
+
+def test_load_token_sync_read_raises_returns_none(tmp_path: Path) -> None:
+    """load_token_sync should return None when _read_token_file fails."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text(json.dumps({}))
+    cache = TokenCache(token_file)
+    with patch.object(TokenCache, "_read_token_file", side_effect=Exception("boom")):
+        assert cache.load_token_sync() is None
+
+
 def test_save_token_raises_tokencacheerror_on_write_error(tmp_path: Path) -> None:
     token_file = tmp_path / "token.json"
     cache = TokenCache(token_file)

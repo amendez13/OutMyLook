@@ -108,6 +108,17 @@ class CachedTokenCredential(TokenCredential):
         Returns:
             An AccessToken with the token string and expiration time
         """
+        if self._token_cache and self._token_cache.has_valid_token():
+            token_data = self._token_cache.load_token_sync()
+            if token_data:
+                cached_scopes = set(token_data.get("scopes") or [])
+                requested_scopes = set(scopes)
+                access_token = token_data.get("access_token")
+                expires_on = token_data.get("expires_on")
+                if access_token and expires_on and requested_scopes.issubset(cached_scopes):
+                    logger.debug("Using cached access token from TokenCache")
+                    return AccessToken(access_token, expires_on)
+
         # Use Azure SDK's credential which handles caching and refresh
         credential = self._get_device_code_credential()
 

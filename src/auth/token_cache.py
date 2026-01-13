@@ -99,6 +99,24 @@ class TokenCache:
             logger.warning(f"Failed to load token: {e}")
             return None
 
+    def load_token_sync(self) -> Optional[dict[str, Any]]:
+        """Load token from cache file synchronously.
+
+        Returns:
+            Token data dictionary if exists and readable, None otherwise
+        """
+        if not self.token_file.exists():
+            logger.debug("Token file does not exist")
+            return None
+
+        try:
+            token_data = self._read_token_file()
+            logger.debug("Token loaded from cache (sync)")
+            return token_data
+        except Exception as e:
+            logger.warning(f"Failed to load token: {e}")
+            return None
+
     def _read_token_file(self) -> dict[str, Any]:
         """Read token data from file (synchronous helper).
 
