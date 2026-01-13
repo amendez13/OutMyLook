@@ -193,6 +193,13 @@ def test_extract_content_bytes_prefers_content_bytes() -> None:
     assert AttachmentHandler._extract_content_bytes(attachment) == b"hello"
 
 
+def test_extract_content_bytes_decodes_base64_bytes() -> None:
+    """_extract_content_bytes should decode base64 bytes content."""
+    payload = base64.b64encode(b"hello")
+    attachment = SimpleNamespace(content_bytes=payload)
+    assert AttachmentHandler._extract_content_bytes(attachment) == b"hello"
+
+
 def test_extract_content_bytes_handles_content_bytes_bytes() -> None:
     """_extract_content_bytes should accept raw bytes in content_bytes."""
     attachment = SimpleNamespace(content_bytes=b"raw")
@@ -202,6 +209,13 @@ def test_extract_content_bytes_handles_content_bytes_bytes() -> None:
 def test_extract_content_bytes_handles_content_bytes_property() -> None:
     """_extract_content_bytes should decode contentBytes string payloads."""
     payload = base64.b64encode(b"hello").decode("ascii")
+    attachment = SimpleNamespace(contentBytes=payload)
+    assert AttachmentHandler._extract_content_bytes(attachment) == b"hello"
+
+
+def test_extract_content_bytes_decodes_base64_bytes_property() -> None:
+    """_extract_content_bytes should decode base64 bytes contentBytes."""
+    payload = base64.b64encode(b"hello")
     attachment = SimpleNamespace(contentBytes=payload)
     assert AttachmentHandler._extract_content_bytes(attachment) == b"hello"
 

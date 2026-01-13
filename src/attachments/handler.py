@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -112,15 +113,29 @@ class AttachmentHandler:
     def _extract_content_bytes(attachment: Any) -> bytes:
         content = getattr(attachment, "content_bytes", None)
         if isinstance(content, (bytes, str)):
-            return base64.b64decode(content) if isinstance(content, str) else content
+            if isinstance(content, str):
+                return base64.b64decode(content)
+            return AttachmentHandler._decode_base64_bytes(content)
         content = getattr(attachment, "contentBytes", None)
         if content is None:
             raise ValueError("Attachment content is not available for download")
         if isinstance(content, bytes):
-            return content
+            return AttachmentHandler._decode_base64_bytes(content)
         if isinstance(content, str):
             return base64.b64decode(content)
         raise TypeError("Unsupported attachment content type")
+
+    @staticmethod
+    def _decode_base64_bytes(payload: bytes) -> bytes:
+        if not payload or not payload.isascii():
+            return payload
+        stripped = b"".join(payload.split())
+        if not stripped:
+            return payload
+        try:
+            return base64.b64decode(stripped, validate=True)
+        except (binascii.Error, ValueError):
+            return payload
 
     async def _get_content_bytes(self, email_id: str, attachment_id: str, attachment: Any) -> bytes:
         try:

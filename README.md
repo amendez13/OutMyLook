@@ -132,8 +132,8 @@ See the `examples/` directory:
 | `login` | Authenticate with Microsoft Graph | `--config` |
 | `status` | Show auth, database, and attachment status | |
 | `logout` | Clear cached tokens | |
-| `fetch` | Fetch emails from Microsoft Graph | `--folder`, `--limit`, `--skip`, `--from`, `--subject`, `--after`, `--before`, `--read`, `--unread`, `--has-attachments` |
-| `list` | Query stored emails locally | `--limit`, `--offset`, `--from`, `--subject`, `--after`, `--before`, `--read`, `--unread`, `--has-attachments` |
+| `fetch` | Fetch emails from Microsoft Graph | `--folder`, `--limit`, `--skip`, `--from`, `--subject`, `--after`, `--before`, `--read`, `--unread`, `--has-attachments`, `--ids` |
+| `list` | Query stored emails locally | `--limit`, `--offset`, `--from`, `--subject`, `--after`, `--before`, `--read`, `--unread`, `--has-attachments`, `--ids` |
 | `export` | Export stored emails to JSON/CSV | `--format`, filters from `list` |
 | `download` | Download attachments | `<email_id>`, `--attachment`, `--unread`, `--has-attachments` |
 

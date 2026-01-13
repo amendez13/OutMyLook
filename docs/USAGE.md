@@ -84,6 +84,7 @@ The command prints a table with received time, sender, subject, read status,
 and attachment presence. Empty folders are handled gracefully.
 If the access token is expired but a refresh token exists, the SDK refreshes
 silently. If authentication fails, run `python -m src.main login`.
+Use `--ids` to print a copy-friendly list of email IDs after the table.
 
 ### Database
 
@@ -151,6 +152,9 @@ python -m src.main list --after 2025-01-01
 
 # Pagination
 python -m src.main list --limit 50 --offset 100
+
+# Copy-friendly IDs
+python -m src.main list --ids
 ```
 
 The table includes the Graph message ID, sender, subject, received time,
