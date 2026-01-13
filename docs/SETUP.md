@@ -230,6 +230,12 @@ pre-commit install
 cp config/config.example.yaml config/config.yaml
 ```
 
+**Login output is noisy (HTTP polling spam)**
+Set `logging.level` to `WARNING` in `config/config.yaml` or run:
+```bash
+LOGGING_LEVEL=WARNING python -m src.main login
+```
+
 ### Getting Help
 
 - Check the [Documentation Index](INDEX.md)

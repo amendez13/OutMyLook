@@ -131,16 +131,15 @@ class CachedTokenCredential(TokenCredential):
             return
 
         try:
-            # Try to run save_token on the event loop. If run_until_complete
-            # raises a RuntimeError (e.g., when the loop is already running),
-            # fall back to asyncio.run.
             try:
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(self._token_cache.save_token(token.token, token.expires_on, scopes))
+                loop = asyncio.get_running_loop()
             except RuntimeError:
                 asyncio.run(self._token_cache.save_token(token.token, token.expires_on, scopes))
+                logger.debug("Token cached successfully")
+                return
 
-            logger.debug("Token cached successfully")
+            loop.create_task(self._token_cache.save_token(token.token, token.expires_on, scopes))
+            logger.debug("Scheduled token cache update")
         except Exception as exc:
             # Don't fail authentication flow if caching fails; just log it.
             logger.debug("Failed to save token to cache: %s", exc)

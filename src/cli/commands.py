@@ -392,7 +392,7 @@ async def _fetch_async(folder: str, limit: int, skip: int, email_filter: Optiona
 
 @app.command()
 def download(
-    email_id: Annotated[Optional[str], typer.Argument(None, help="Email ID to download attachments from")] = None,
+    email_id: Annotated[Optional[str], typer.Argument(help="Email ID to download attachments from")] = None,
     attachment_id: Annotated[
         Optional[str], typer.Option("--attachment", "-a", help="Specific attachment ID to download")
     ] = None,

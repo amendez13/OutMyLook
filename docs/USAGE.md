@@ -244,3 +244,4 @@ Optional values:
 - **Not authenticated**: Run `python -m src.main login`.
 - **Invalid client_id**: Verify `azure.client_id` in `config/config.yaml`.
 - **No emails returned**: Try a different folder or reduce `--skip`.
+- **Login output is noisy**: Set `logging.level` to `WARNING` in `config/config.yaml` or use `LOGGING_LEVEL=WARNING`.
