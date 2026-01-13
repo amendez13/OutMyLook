@@ -13,7 +13,7 @@ from src.email.models import Email, EmailAddress
 def make_email(
     email_id: str,
     *,
-    subject: str = "Subject",
+    subject: str | None = "Subject",
     sender_email: str = "alice@example.com",
     sender_name: str = "Alice",
     received_at: datetime | None = None,
@@ -149,7 +149,8 @@ async def test_search_filters(session) -> None:
         subject="Hello there",
         received_at=base_time + timedelta(days=2),
     )
-    await repo.save_many([early, later])
+    null_subject = make_email("id-9", subject=None, received_at=base_time + timedelta(days=1))
+    await repo.save_many([early, later, null_subject])
 
     sender_results = await repo.search(sender="boss@company.com")
     assert [email.id for email in sender_results] == ["id-7"]
@@ -158,10 +159,10 @@ async def test_search_filters(session) -> None:
     assert [email.id for email in subject_results] == ["id-8"]
 
     from_results = await repo.search(date_from=base_time + timedelta(days=1))
-    assert [email.id for email in from_results] == ["id-8"]
+    assert [email.id for email in from_results] == ["id-9", "id-8"]
 
     to_results = await repo.search(date_to=base_time + timedelta(days=1))
-    assert [email.id for email in to_results] == ["id-7"]
+    assert [email.id for email in to_results] == ["id-7", "id-9"]
 
 
 @pytest.mark.asyncio

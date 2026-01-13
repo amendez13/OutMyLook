@@ -199,6 +199,44 @@ async def test_list_emails_skips_invalid_message(caplog: pytest.LogCaptureFixtur
 
 
 @pytest.mark.asyncio
+async def test_list_emails_without_repository_returns_results() -> None:
+    """list_emails should work when no repository is configured."""
+    graph_client = MagicMock()
+
+    message = MagicMock()
+    message.id = "msg-9"
+    message.subject = "Hello"
+    message.sender = MagicMock()
+    message.sender.email_address = MagicMock()
+    message.sender.email_address.address = "alice@example.com"
+    message.sender.email_address.name = "Alice"
+    message.received_date_time = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    message.body_preview = "Preview"
+    message.body = MagicMock(content="Body")
+    message.is_read = False
+    message.has_attachments = True
+    message.parent_folder_id = "inbox"
+
+    response = MagicMock()
+    response.value = [message]
+
+    messages_request = MagicMock()
+    messages_request.get = AsyncMock(return_value=response)
+
+    folder_request = MagicMock()
+    folder_request.messages = messages_request
+
+    graph_client.me.mail_folders.by_id.return_value = folder_request
+
+    client = EmailClient(graph_client)
+
+    with patch.object(client, "_build_messages_request_config", return_value=None):
+        emails = await client.list_emails(folder="Inbox", limit=1, skip=0)
+
+    assert len(emails) == 1
+
+
+@pytest.mark.asyncio
 async def test_list_emails_saves_to_repository() -> None:
     """list_emails should persist emails when a repository is configured."""
     graph_client = MagicMock()
@@ -238,6 +276,76 @@ async def test_list_emails_saves_to_repository() -> None:
 
     assert len(emails) == 1
     repository.save_many.assert_awaited_once_with(emails)
+
+
+@pytest.mark.asyncio
+async def test_list_emails_with_repository_empty_does_not_save() -> None:
+    """list_emails should not save when there are no emails."""
+    graph_client = MagicMock()
+
+    response = MagicMock()
+    response.value = []
+
+    messages_request = MagicMock()
+    messages_request.get = AsyncMock(return_value=response)
+
+    folder_request = MagicMock()
+    folder_request.messages = messages_request
+
+    graph_client.me.mail_folders.by_id.return_value = folder_request
+
+    repository = MagicMock()
+    repository.save_many = AsyncMock()
+
+    client = EmailClient(graph_client, email_repository=repository)
+
+    with patch.object(client, "_build_messages_request_config", return_value=None):
+        emails = await client.list_emails(folder="Inbox", limit=1, skip=0)
+
+    assert emails == []
+    repository.save_many.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_emails_save_raises_propagates() -> None:
+    """list_emails should propagate repository errors."""
+    graph_client = MagicMock()
+
+    message = MagicMock()
+    message.id = "msg-11"
+    message.subject = "Hello"
+    message.sender = MagicMock()
+    message.sender.email_address = MagicMock()
+    message.sender.email_address.address = "alice@example.com"
+    message.sender.email_address.name = "Alice"
+    message.received_date_time = datetime(2024, 1, 2, 12, 0, tzinfo=timezone.utc)
+    message.body_preview = "Preview"
+    message.body = MagicMock(content="Body")
+    message.is_read = False
+    message.has_attachments = True
+    message.parent_folder_id = "inbox"
+
+    response = MagicMock()
+    response.value = [message]
+
+    messages_request = MagicMock()
+    messages_request.get = AsyncMock(return_value=response)
+
+    folder_request = MagicMock()
+    folder_request.messages = messages_request
+
+    graph_client.me.mail_folders.by_id.return_value = folder_request
+
+    repository = MagicMock()
+    repository.save_many = AsyncMock(side_effect=RuntimeError("db failure"))
+
+    client = EmailClient(graph_client, email_repository=repository)
+
+    with (
+        patch.object(client, "_build_messages_request_config", return_value=None),
+        pytest.raises(RuntimeError, match="db failure"),
+    ):
+        await client.list_emails(folder="Inbox", limit=1, skip=0)
 
 
 @pytest.mark.asyncio

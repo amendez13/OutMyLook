@@ -115,7 +115,7 @@ class EmailRepository:
         if sender:
             stmt = stmt.where(EmailModel.sender_email.contains(sender))
         if subject:
-            stmt = stmt.where(EmailModel.subject.contains(subject))
+            stmt = stmt.where(EmailModel.subject.is_not(None)).where(EmailModel.subject.contains(subject))
         if date_from:
             stmt = stmt.where(EmailModel.received_at >= date_from)
         if date_to:

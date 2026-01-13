@@ -24,10 +24,22 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def _expand_sqlite_path(url: str) -> str:
+    if url.startswith("sqlite:///"):
+        path = url.replace("sqlite:///", "", 1)
+        expanded = Path(path).expanduser()
+        return f"sqlite:///{expanded}"
+    if url.startswith("sqlite://"):
+        path = url.replace("sqlite://", "", 1)
+        expanded = Path(path).expanduser()
+        return f"sqlite://{expanded}"
+    return url
+
+
 def _normalize_url(url: str) -> str:
     if "+aiosqlite" in url:
-        return url.replace("+aiosqlite", "")
-    return url
+        url = url.replace("+aiosqlite", "")
+    return _expand_sqlite_path(url)
 
 
 def get_url() -> str:
