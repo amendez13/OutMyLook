@@ -16,16 +16,14 @@ A Python application for managing Microsoft Outlook emails using the Microsoft G
 - **Persistent Database Storage**: Fetch results are stored locally for later querying
 - **Attachment Downloads**: Download and track email attachments locally
 
-## Quick Start
-
-### Prerequisites
+## Prerequisites
 
 - Python 3.10 or higher
 - pip (Python package installer)
 - Microsoft account (@outlook.com, @hotmail.com, @live.com, or organizational account)
-- Azure AD application registration (see [Setup Guide](docs/SETUP.md) for details)
+- Azure AD application registration (see [Setup Guide](docs/SETUP.md))
 
-### Installation
+## Installation
 
 1. Clone the repository:
 ```bash
@@ -33,7 +31,7 @@ git clone https://github.com/your-username/OutMyLook.git
 cd OutMyLook
 ```
 
-2. Create and activate virtual environment:
+2. Create and activate a virtual environment:
 ```bash
 python3 -m venv venv
 source venv/bin/activate  # On macOS/Linux
@@ -53,74 +51,131 @@ cp config/config.example.yaml config/config.yaml
 # Edit config/config.yaml with your settings
 ```
 
-### Usage
+## Quick Start
 
-#### Authentication
-
-First, authenticate with your Microsoft account:
+Authenticate, then fetch the latest emails:
 
 ```bash
-# Login with Device Code Flow
 python -m src.main login
+python -m src.main fetch --folder inbox --limit 10
+```
 
-# Check authentication status
+## Usage
+
+### Authentication
+
+```bash
+python -m src.main login
 python -m src.main status
-
-# Logout (clear cached tokens)
 python -m src.main logout
 ```
 
-The login command will display a URL and device code. Visit the URL in your browser and enter the code to complete authentication. Your tokens will be cached securely for future use.
+The login command displays a device code URL. Visit the URL, enter the code, and grant permissions. Tokens are cached at the path configured in `storage.token_file`.
 
-#### Email Management
+### Fetching Email
 
 ```bash
-python -m src.main fetch --limit 10 --folder inbox  # Fetch emails
-python -m src.main list                              # List stored emails
-python -m src.main export emails.json --format json  # Export emails
-python -m src.main download <email_id>               # Download attachments
+python -m src.main fetch --folder inbox --limit 25 --skip 0
+python -m src.main fetch --from "boss@company.com" --subject "invoice"
+python -m src.main fetch --after 2025-01-01 --unread --has-attachments
 ```
 
-Use `--verbose` for detailed logs or `--quiet` for summary-only output.
+Fetched messages are persisted to the local database (default `~/.outmylook/emails.db`). Duplicate Graph IDs are updated in place.
 
-See `docs/USAGE.md` for a full usage guide, including configuration tips, folder selection, pagination,
-local database querying/export, and attachment downloads.
+### Listing Stored Emails
 
-## Configuration
+```bash
+python -m src.main list
+python -m src.main list --from "amazon.com" --after 2025-01-01
+python -m src.main list --limit 50 --offset 100
+```
+
+### Exporting Stored Emails
+
+```bash
+python -m src.main export exports/emails.json --format json
+python -m src.main export exports/emails.csv --format csv --unread
+```
+
+### Downloading Attachments
+
+```bash
+python -m src.main download <email_id>
+python -m src.main download <email_id> --attachment <attachment_id>
+python -m src.main download --unread --has-attachments
+```
+
+Attachments are stored under `storage.attachments_dir` (default `~/.outmylook/attachments`).
+
+### Output Controls
+
+Global flags apply to all commands:
+
+- `--verbose`: Enable debug logging and show more detail.
+- `--quiet`: Suppress non-essential output (errors and summaries only).
+
+### Example Scripts
+
+See the `examples/` directory:
+
+- `examples/fetch_recent.py`
+- `examples/download_attachments.py`
+- `examples/export_to_csv.py`
+
+## CLI Command Reference
+
+| Command | Purpose | Common options |
+| --- | --- | --- |
+| `login` | Authenticate with Microsoft Graph | `--config` |
+| `status` | Show auth, database, and attachment status | |
+| `logout` | Clear cached tokens | |
+| `fetch` | Fetch emails from Microsoft Graph | `--folder`, `--limit`, `--skip`, `--from`, `--subject`, `--after`, `--before`, `--read`, `--unread`, `--has-attachments` |
+| `list` | Query stored emails locally | `--limit`, `--offset`, `--from`, `--subject`, `--after`, `--before`, `--read`, `--unread`, `--has-attachments` |
+| `export` | Export stored emails to JSON/CSV | `--format`, filters from `list` |
+| `download` | Download attachments | `<email_id>`, `--attachment`, `--unread`, `--has-attachments` |
+
+Run `python -m src.main --help` or `python -m src.main <command> --help` for full details.
+
+## Configuration Options
 
 Configuration is stored in `config/config.yaml`. See `config/config.example.yaml` for all available options.
 
 ```yaml
-# Azure AD Application Settings
 azure:
-  # Your Azure AD application (client) ID
   client_id: "your-azure-app-client-id"
-
-  # Tenant ID - use "common" for personal Microsoft accounts
   tenant: "common"
-
-  # Microsoft Graph API scopes
   scopes:
     - "https://graph.microsoft.com/Mail.Read"
     - "https://graph.microsoft.com/User.Read"
     - "offline_access"
 
-# Database Configuration
 database:
   url: "sqlite:///~/.outmylook/emails.db"
 
-# Storage Settings
 storage:
   attachments_dir: "~/.outmylook/attachments"
   token_file: "~/.outmylook/tokens.json"
 
-# Logging Configuration
 logging:
   level: "INFO"
 ```
 
-**Important**: You need to register an Azure AD application to get your `client_id`. See [Setup Guide](docs/SETUP.md) for detailed instructions.
-For database configuration and migrations, see [Database Guide](docs/DATABASE.md).
+You can override settings with environment variables using these prefixes:
+
+- `AZURE_CLIENT_ID`, `AZURE_TENANT`, `AZURE_SCOPES`
+- `DATABASE_URL`
+- `STORAGE_ATTACHMENTS_DIR`, `STORAGE_TOKEN_FILE`
+- `LOGGING_LEVEL`
+
+For database setup and migrations, see [Database Guide](docs/DATABASE.md).
+
+## Troubleshooting
+
+- **Authentication fails or client_id missing**: Ensure `azure.client_id` is set in `config/config.yaml` or `AZURE_CLIENT_ID` is exported.
+- **Device code flow never completes**: Confirm the account used to sign in has granted consent to the app registration.
+- **Token cache is stale**: Delete the file at `storage.token_file` and re-run `login`.
+- **SQLite database is locked**: Make sure no other process is using the DB; restart any running fetch/list/export commands.
+- **Attachments not downloading**: Confirm the `Mail.Read` scope is present and the email actually has attachments.
 
 ## Project Structure
 
@@ -130,8 +185,9 @@ OutMyLook/
 ├── .claude/              # Claude Code configuration
 ├── config/               # Configuration files
 ├── docs/                 # Documentation
-├── src/       # Source code
-├── tests/         # Test files
+├── examples/             # Example scripts
+├── src/                  # Source code
+├── tests/                # Test files
 ├── CLAUDE.md             # AI assistant guidance
 ├── README.md             # This file
 ├── pyproject.toml        # Tool configuration
@@ -143,20 +199,14 @@ OutMyLook/
 ### Setup Development Environment
 
 ```bash
-# Install dev dependencies
 pip install -r requirements-dev.txt
-
-# Install pre-commit hooks
 pre-commit install
 ```
 
 ### Running Tests
 
 ```bash
-# Run all tests
 pytest
-
-# Run with coverage
 pytest --cov=src --cov-report=term-missing
 ```
 
@@ -187,7 +237,9 @@ See [docs/CI.md](docs/CI.md) for details.
 
 - [Documentation Index](docs/INDEX.md) - All documentation
 - [Setup Guide](docs/SETUP.md) - Installation and configuration
-- [CI Documentation](docs/CI.md) - CI/CD pipeline details
+- [Usage Guide](docs/USAGE.md) - CLI usage and examples
+- [Database Guide](docs/DATABASE.md) - Local storage and migrations
+- [Architecture](docs/ARCHITECTURE.md) - Technical design and components
 
 ## Contributing
 
@@ -198,12 +250,3 @@ See [docs/CI.md](docs/CI.md) for details.
 5. Commit your changes (`git commit -m 'feat: add amazing feature'`)
 6. Push to the branch (`git push origin feature/amazing-feature`)
 7. Open a Pull Request
-
-## License
-
-[Choose your license]
-
-## Acknowledgments
-
-- [Acknowledgment 1]
-- [Acknowledgment 2]

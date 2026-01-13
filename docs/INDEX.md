@@ -9,10 +9,12 @@ Welcome to the OutMyLook documentation. This index provides easy access to all d
 - [Setup Guide](#setup-guides) - Configure your environment
 - [Usage Guide](#usage) - CLI usage and examples
 - [Database Guide](#database) - Persistent storage details
+- [Example Scripts](#examples) - Practical end-to-end scripts
 
 **For Developers:**
 - [Architecture](#architecture) - Technical design and implementation details
 - [Developer Guide](#developer-resources) - Contributing and development workflow
+- [API Reference](#api-reference) - Python module overview
 
 ---
 
@@ -68,6 +70,27 @@ Welcome to the OutMyLook documentation. This index provides easy access to all d
 - Performance considerations
 - Security implications
 
+OutMyLook is organized around an authentication layer (Device Code Flow), a Graph
+client wrapper for email operations, a local persistence layer using SQLAlchemy,
+and a CLI that wires these layers together for end users.
+
+---
+
+## API Reference
+
+**[API.md](API.md)**
+- Overview of public Python modules and classes
+- Suggested integration points for scripting
+
+---
+
+## Examples
+
+**[examples/](../examples/)**
+- [fetch_recent.py](../examples/fetch_recent.py) - Fetch and display recent emails
+- [download_attachments.py](../examples/download_attachments.py) - Download attachments from filtered emails
+- [export_to_csv.py](../examples/export_to_csv.py) - Export stored emails to CSV
+
 ---
 
 ## Developer Resources
@@ -91,17 +114,13 @@ Welcome to the OutMyLook documentation. This index provides easy access to all d
 
 ## Project Status
 
-**Current Phase:** [Current development phase]
-- [Feature 1]
-- [Feature 2]
+**Current Phase:** Phase 8 - Testing & Documentation
+- Integration tests with mocked Graph API
+- Documentation and examples refresh
 
-**Next Phase:** [Upcoming phase]
-- [Planned feature 1]
-- [Planned feature 2]
+**Next Phase:** TBD
 
-**Future:** [Long-term plans]
-- [Future feature 1]
-- [Future feature 2]
+**Future:** TBD
 
 ---
 
@@ -113,6 +132,7 @@ Welcome to the OutMyLook documentation. This index provides easy access to all d
 | [SETUP.md](SETUP.md) | Environment configuration | All users |
 | [DATABASE.md](DATABASE.md) | Database storage and migrations | All users |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Technical architecture and design | Developers |
+| [API.md](API.md) | Python module overview | Developers |
 | [CI.md](CI.md) | CI/CD pipeline and development workflow | Developers |
 | [CLAUDE.md](../CLAUDE.md) | AI assistant guidance | Claude Code |
 
