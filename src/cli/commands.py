@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
 from pathlib import Path
-from typing import Annotated, Callable, Optional, TypedDict
+from typing import Annotated, Any, Callable, Iterable, Optional, TypedDict
 
 import typer
 from rich.console import Console
@@ -315,6 +315,7 @@ def fetch(
     unread: Annotated[bool, typer.Option("--unread", help="Filter to unread emails only")] = False,
     read: Annotated[bool, typer.Option("--read", help="Filter to read emails only")] = False,
     has_attachments: Annotated[bool, typer.Option("--has-attachments", help="Filter to emails with attachments")] = False,
+    ids: Annotated[bool, typer.Option("--ids", help="Print copy-friendly email IDs")] = False,
 ) -> None:
     """Fetch emails from Microsoft Graph."""
     email_filter = _build_email_filter(
@@ -326,10 +327,10 @@ def fetch(
         read=read,
         has_attachments=has_attachments,
     )
-    asyncio.run(_fetch_async(folder, limit, skip, email_filter))
+    asyncio.run(_fetch_async(folder, limit, skip, email_filter, ids))
 
 
-async def _fetch_async(folder: str, limit: int, skip: int, email_filter: Optional[EmailFilter]) -> None:
+async def _fetch_async(folder: str, limit: int, skip: int, email_filter: Optional[EmailFilter], show_ids: bool) -> None:
     """Async implementation of fetch command."""
     try:
         settings = get_settings()
@@ -374,8 +375,10 @@ async def _fetch_async(folder: str, limit: int, skip: int, email_filter: Optiona
             )
             return
 
-        table = build_email_table(emails, title=f"Emails in {folder}", include_id=False, include_read=True)
+        table = build_email_table(emails, title=f"Emails in {folder}", include_id=show_ids, include_read=True)
         _console_print(table)
+        if show_ids:
+            _emit_email_ids(emails)
 
     except AuthenticationError as e:
         _console_print(
@@ -418,9 +421,10 @@ def list_emails(
     unread: Annotated[bool, typer.Option("--unread", help="Filter to unread emails only")] = False,
     read: Annotated[bool, typer.Option("--read", help="Filter to read emails only")] = False,
     has_attachments: Annotated[bool, typer.Option("--has-attachments", help="Filter to emails with attachments")] = False,
+    ids: Annotated[bool, typer.Option("--ids", help="Print copy-friendly email IDs")] = False,
 ) -> None:
     """List stored emails from the local database."""
-    asyncio.run(_list_async(limit, offset, from_address, subject, after, before, unread, read, has_attachments))
+    asyncio.run(_list_async(limit, offset, from_address, subject, after, before, unread, read, has_attachments, ids))
 
 
 @app.command()
@@ -450,6 +454,8 @@ async def _download_async(
         settings = get_settings()
         _setup_logging(settings)
         settings.ensure_directories()
+        email_id = _normalize_graph_id(email_id)
+        attachment_id = _normalize_graph_id(attachment_id)
         logger.debug(
             "Starting download: email_id=%s attachment_id=%s unread=%s has_attachments=%s",
             email_id,
@@ -512,6 +518,7 @@ async def _list_async(
     unread: bool,
     read: bool,
     has_attachments: bool,
+    show_ids: bool,
 ) -> None:
     """Async implementation of list command."""
     try:
@@ -561,18 +568,23 @@ async def _list_async(
             return
 
         if _OUTPUT.quiet:
-            _console_print(
-                Panel.fit(
-                    f"✓ Found {len(emails)} stored email(s).",
-                    title="List",
-                    border_style="green",
-                ),
-                level="summary",
-            )
+            if show_ids:
+                _emit_email_ids(emails)
+            else:
+                _console_print(
+                    Panel.fit(
+                        f"✓ Found {len(emails)} stored email(s).",
+                        title="List",
+                        border_style="green",
+                    ),
+                    level="summary",
+                )
             return
 
         table = build_email_table(emails, title="Stored Emails", include_id=True, include_read=False)
         _console_print(table)
+        if show_ids:
+            _emit_email_ids(emails)
 
     except typer.BadParameter:
         raise
@@ -790,6 +802,21 @@ def _normalize_export_format(value: str) -> str:
     if lowered not in SUPPORTED_FORMATS:
         raise typer.BadParameter(f"Unsupported export format: {value}")
     return lowered
+
+
+def _normalize_graph_id(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = "".join(value.split())
+    return normalized or None
+
+
+def _emit_email_ids(emails: Iterable[Any]) -> None:
+    ids = [str(getattr(email, "id", "")) for email in emails if getattr(email, "id", None)]
+    if not ids:
+        return
+    _console_print("Email IDs (copy/paste):", level="summary")
+    _console_print("\n".join(ids), level="summary")
 
 
 async def _get_email_count(session: AsyncSession) -> int:
