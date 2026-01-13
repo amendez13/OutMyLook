@@ -24,7 +24,7 @@ def export_emails(emails: Iterable[EmailModel], output_path: Path, fmt: str) -> 
 
     if format_lower == "json":
         with output_path.open("w", encoding="utf-8") as handle:
-            json.dump(serialized, handle, ensure_ascii=True, indent=2)
+            json.dump(serialized, handle, ensure_ascii=False, indent=2)
         return
 
     fieldnames = list(serialized[0].keys()) if serialized else list(_empty_export_fields().keys())

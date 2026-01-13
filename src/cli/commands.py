@@ -12,12 +12,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.attachments import AttachmentHandler
 from src.auth import AuthenticationError, GraphAuthenticator, TokenCache
 from src.cli.exporters import SUPPORTED_FORMATS, export_emails
 from src.cli.formatters import build_email_table, build_status_panel, format_bytes
-from src.config.settings import get_settings
+from src.config.settings import Settings, get_settings
 from src.database.models import EmailModel
 from src.database.repository import AttachmentRepository, EmailRepository, get_session
 from src.email import EmailClient, EmailFilter
@@ -61,7 +62,7 @@ def _configure_output(verbose: bool, quiet: bool) -> None:
     _OUTPUT.quiet = quiet
 
 
-def _setup_logging(settings) -> None:
+def _setup_logging(settings: Settings) -> None:
     settings.setup_logging()
     root_logger = logging.getLogger()
     if _OUTPUT.verbose:
@@ -784,7 +785,7 @@ def _normalize_export_format(value: str) -> str:
     return lowered
 
 
-async def _get_email_count(session) -> int:
+async def _get_email_count(session: AsyncSession) -> int:
     result = await session.execute(select(func.count()).select_from(EmailModel))
     return int(result.scalar() or 0)
 

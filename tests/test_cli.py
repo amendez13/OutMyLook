@@ -274,7 +274,7 @@ def test_build_local_filters_rejects_conflicting_read() -> None:
         )
 
 
-def test_build_local_filters_rejects_after_after_before() -> None:
+def test_build_local_filters_rejects_after_greater_than_before() -> None:
     with pytest.raises(typer.BadParameter, match="--after must be before or equal to --before"):
         commands._build_local_filters(
             from_address=None,
@@ -337,3 +337,5 @@ def test_get_attachment_stats_counts_files(tmp_path: Path) -> None:
 def test_parse_date_input_accepts_date_only() -> None:
     parsed = commands._parse_date_input("2024-01-01", "after")
     assert parsed.year == 2024
+    assert parsed.month == 1
+    assert parsed.day == 1

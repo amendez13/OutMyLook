@@ -58,15 +58,18 @@ def build_status_panel(lines: Iterable[tuple[str, str]], *, title: str = "Status
 
 def format_bytes(size_bytes: int) -> str:
     """Format bytes as human-readable text."""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    units = ["KB", "MB", "GB", "TB", "PB"]
+    units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"]
     size = float(size_bytes)
-    for unit in units:
+    unit_index = 0
+
+    while size >= 1024 and unit_index < len(units) - 1:
         size /= 1024
-        if size < 1024:
-            return f"{size:.1f} {unit}"
-    return f"{size:.1f} EB"
+        unit_index += 1
+
+    if unit_index == 0:
+        return f"{int(size)} {units[unit_index]}"
+
+    return f"{size:.1f} {units[unit_index]}"
 
 
 def _format_sender(email: Any) -> str:

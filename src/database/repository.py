@@ -99,7 +99,7 @@ class EmailRepository:
 
     async def list_all(
         self,
-        limit: Optional[int] = 100,
+        limit: Optional[int] = None,
         offset: int = 0,
         order_by: str = "received_at",
     ) -> list[EmailModel]:
