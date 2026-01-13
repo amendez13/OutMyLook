@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.email.client import EmailClient
+from src.email.filters import EmailFilter
 from src.email.models import MailFolder
 
 
@@ -323,12 +324,32 @@ def test_build_messages_request_config_builds_query() -> None:
     client = EmailClient(MagicMock())
 
     with patch.object(client, "_import_builder", return_value=DummyMessagesBuilder):
-        config = client._build_messages_request_config(limit=5, skip=10)
+        config = client._build_messages_request_config(limit=5, skip=10, filter_query="isRead eq true")
 
     assert config.query_parameters.kwargs["top"] == 5
     assert config.query_parameters.kwargs["skip"] == 10
+    assert config.query_parameters.kwargs["filter"] == "isRead eq true"
     assert "subject" in config.query_parameters.kwargs["select"]
     assert "receivedDateTime desc" in config.query_parameters.kwargs["orderby"]
+
+
+@pytest.mark.asyncio
+async def test_list_emails_passes_filter_query() -> None:
+    """list_emails should pass filters into request configuration."""
+    graph_client = MagicMock()
+    messages_request = MagicMock()
+    messages_request.get = AsyncMock(return_value=MagicMock(value=[]))
+    folder_request = MagicMock(messages=messages_request)
+    graph_client.me.mail_folders.by_id.return_value = folder_request
+
+    client = EmailClient(graph_client)
+    email_filter = EmailFilter().subject_contains("hello")
+
+    config = MagicMock()
+    with patch.object(client, "_build_messages_request_config", return_value=config) as mock_config:
+        await client.list_emails(folder="Inbox", limit=5, skip=0, email_filter=email_filter)
+
+    mock_config.assert_called_with(limit=5, skip=0, filter_query=email_filter.build())
 
 
 def test_build_folders_request_config_returns_none_when_builder_missing() -> None:
