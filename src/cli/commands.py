@@ -15,6 +15,7 @@ from rich.table import Table
 from src.attachments import AttachmentHandler
 from src.auth import AuthenticationError, GraphAuthenticator, TokenCache
 from src.config.settings import get_settings
+from src.database.models import EmailModel
 from src.database.repository import AttachmentRepository, EmailRepository, get_session
 from src.email import Email, EmailClient, EmailFilter
 
@@ -432,7 +433,7 @@ async def _download_for_single_email(
     )
 
 
-async def _download_for_filtered_emails(handler: AttachmentHandler, emails) -> None:
+async def _download_for_filtered_emails(handler: AttachmentHandler, emails: list[EmailModel]) -> None:
     if not emails:
         console.print(
             Panel.fit(

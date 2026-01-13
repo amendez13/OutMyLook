@@ -89,6 +89,22 @@ When attachments are listed or downloaded, the attachment metadata is saved or
 updated in the `attachments` table. Downloads also update `local_path` and
 `downloaded_at` for tracking and deduplication.
 
+## Attachment Queries
+
+Inspect attachment status and local paths:
+
+```bash
+sqlite3 ~/.outmylook/emails.db \
+  "SELECT email_id, name, local_path, downloaded_at FROM attachments ORDER BY created_at DESC LIMIT 10;"
+```
+
+Find emails with missing downloads:
+
+```bash
+sqlite3 ~/.outmylook/emails.db \
+  "SELECT email_id, name FROM attachments WHERE local_path IS NULL ORDER BY created_at DESC;"
+```
+
 ## Configuration
 
 The database URL is configured in `config/config.yaml`:

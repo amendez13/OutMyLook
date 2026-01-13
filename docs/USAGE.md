@@ -148,6 +148,9 @@ Notes:
 Troubleshooting:
 - **No attachments found**: Confirm the message actually has attachments and that
   you requested the correct email ID or filters.
+- **Large attachments missing content**: OutMyLook falls back to the Graph `$value`
+  endpoint for large files. If you still see "content is not available", retry
+  and confirm your Graph permissions allow attachment downloads.
 - **Download errors**: Verify the app has permission to write to
   `storage.attachments_dir` and that the directory exists.
 - **Nothing happens for filters**: Use `fetch --unread --has-attachments` first

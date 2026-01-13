@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, cast
 
+from kiota_abstractions.method import Method
+from kiota_abstractions.request_information import RequestInformation
 from msgraph import GraphServiceClient
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TimeRemainingColumn
 
@@ -42,7 +44,7 @@ class AttachmentHandler:
         target_dir.mkdir(parents=True, exist_ok=True)
         target_path = self._ensure_unique_path(target_dir / name)
 
-        content_bytes = self._extract_content_bytes(attachment)
+        content_bytes = await self._get_content_bytes(email_id, attachment_id, attachment)
         await self._write_with_progress(target_path, content_bytes, attachment_model.name)
 
         await self._repository.save_metadata(email_id, [attachment_model])
@@ -120,6 +122,32 @@ class AttachmentHandler:
             return base64.b64decode(content)
         raise TypeError("Unsupported attachment content type")
 
+    async def _get_content_bytes(self, email_id: str, attachment_id: str, attachment: Any) -> bytes:
+        try:
+            return self._extract_content_bytes(attachment)
+        except ValueError as exc:
+            logger.info("Attachment content missing; fetching via $value endpoint: %s", exc)
+            return await self._download_attachment_value(email_id, attachment_id)
+
+    async def _download_attachment_value(self, email_id: str, attachment_id: str) -> bytes:
+        request_adapter = getattr(self._graph_client, "request_adapter", None)
+        if request_adapter is None:
+            raise ValueError("Attachment content is not available for download")
+        request_info = RequestInformation(
+            Method.GET,
+            "{+baseurl}/me/messages/{message%2Did}/attachments/{attachment%2Did}/$value",
+            {"message%2Did": email_id, "attachment%2Did": attachment_id},
+        )
+        request_info.headers.try_add("Accept", "application/octet-stream")
+        content = await request_adapter.send_primitive_async(request_info, "bytes", None)
+        if content is None:
+            raise ValueError("Attachment content is not available for download")
+        if isinstance(content, bytearray):
+            return bytes(content)
+        if isinstance(content, bytes):
+            return content
+        raise TypeError("Unsupported attachment content type")
+
     @staticmethod
     def _ensure_unique_path(path: Path) -> Path:
         if not path.exists():
@@ -128,11 +156,13 @@ class AttachmentHandler:
         suffix = path.suffix
         parent = path.parent
         counter = 1
-        while True:
+        max_attempts = 1000
+        while counter <= max_attempts:
             candidate = parent / f"{stem}_{counter}{suffix}"
             if not candidate.exists():
                 return candidate
             counter += 1
+        raise RuntimeError(f"Unable to resolve unique path for {path} after {max_attempts} attempts")
 
     @staticmethod
     async def _write_with_progress(path: Path, content: bytes, label: str) -> None:
