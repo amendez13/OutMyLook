@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING, AsyncIterator, Iterable, Optional, cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
-from src.database.models import Base, EmailModel
+from src.database.models import AttachmentModel, Base, EmailModel
 
 if TYPE_CHECKING:
+    from src.attachments.models import Attachment
     from src.email.models import Email
 
 
@@ -109,6 +110,8 @@ class EmailRepository:
         subject: Optional[str] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        is_read: Optional[bool] = None,
+        has_attachments: Optional[bool] = None,
     ) -> list[EmailModel]:
         """Search stored emails."""
         stmt = select(EmailModel)
@@ -120,6 +123,10 @@ class EmailRepository:
             stmt = stmt.where(EmailModel.received_at >= date_from)
         if date_to:
             stmt = stmt.where(EmailModel.received_at <= date_to)
+        if is_read is not None:
+            stmt = stmt.where(EmailModel.is_read.is_(is_read))
+        if has_attachments is not None:
+            stmt = stmt.where(EmailModel.has_attachments.is_(has_attachments))
 
         result = await self.session.execute(stmt.order_by(EmailModel.received_at))
         return list(result.scalars())
@@ -171,3 +178,81 @@ def _resolve_order_column(order_by: str):
     if column is None:
         raise ValueError(f"Invalid order_by column: {order_by}")
     return column
+
+
+class AttachmentRepository:
+    """Repository for persisted attachments."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def save_metadata(self, email_id: str, attachments: list["Attachment"]) -> list[AttachmentModel]:
+        """Save or update attachment metadata."""
+        if not attachments:
+            return []
+
+        unique = {attachment.id: attachment for attachment in attachments}
+        existing = await self._fetch_existing(unique.keys())
+        models: list[AttachmentModel] = []
+
+        for attachment_id, attachment in unique.items():
+            model = existing.get(attachment_id)
+            if model is None:
+                model = _build_attachment_model(email_id, attachment)
+                self.session.add(model)
+            else:
+                _apply_attachment(model, email_id, attachment)
+                self.session.add(model)
+            models.append(model)
+
+        await self.session.commit()
+        for model in models:
+            await self.session.refresh(model)
+        return models
+
+    async def get_by_id(self, attachment_id: str) -> Optional[AttachmentModel]:
+        """Get attachment by Graph API ID."""
+        result = await self.session.scalars(select(AttachmentModel).where(AttachmentModel.id == attachment_id))
+        return cast(Optional[AttachmentModel], result.one_or_none())
+
+    async def list_for_email(self, email_id: str) -> list[AttachmentModel]:
+        """List attachments for an email."""
+        result = await self.session.execute(
+            select(AttachmentModel).where(AttachmentModel.email_id == email_id).order_by(AttachmentModel.created_at)
+        )
+        return list(result.scalars())
+
+    async def mark_downloaded(self, attachment_id: str, local_path: str, downloaded_at: datetime) -> Optional[AttachmentModel]:
+        """Mark an attachment as downloaded."""
+        model = await self.get_by_id(attachment_id)
+        if model is None:
+            return None
+        model.local_path = local_path
+        model.downloaded_at = downloaded_at
+        self.session.add(model)
+        await self.session.commit()
+        await self.session.refresh(model)
+        return model
+
+    async def _fetch_existing(self, attachment_ids: Iterable[str]) -> dict[str, AttachmentModel]:
+        if not attachment_ids:
+            return {}
+        result = await self.session.execute(select(AttachmentModel).where(AttachmentModel.id.in_(list(attachment_ids))))
+        return {model.id: model for model in result.scalars()}
+
+
+def _build_attachment_model(email_id: str, attachment: "Attachment") -> AttachmentModel:
+    return AttachmentModel(
+        id=attachment.id,
+        email_id=email_id,
+        name=attachment.name,
+        content_type=attachment.content_type,
+        size=attachment.size,
+    )
+
+
+def _apply_attachment(model: AttachmentModel, email_id: str, attachment: "Attachment") -> None:
+    model.email_id = email_id
+    model.name = attachment.name
+    model.content_type = attachment.content_type
+    model.size = attachment.size

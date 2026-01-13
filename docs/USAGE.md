@@ -117,6 +117,45 @@ python -m src.main fetch --from "boss@company.com" --subject "invoice" --has-att
 
 See `docs/DATABASE.md` for schema details and migration commands.
 
+### Attachment downloads
+
+Attachments are downloaded to the directory configured in `storage.attachments_dir`
+(default: `~/.outmylook/attachments`). Files are stored under a per-email folder
+using the original filename; conflicts add an incrementing suffix.
+
+Basic usage:
+
+```bash
+# Download all attachments for a specific email
+python -m src.main download <email_id>
+
+# Download a specific attachment
+python -m src.main download <email_id> --attachment <attachment_id>
+```
+
+Filter-based downloads:
+
+```bash
+# Download attachments for unread emails that have attachments
+python -m src.main download --unread --has-attachments
+```
+
+Notes:
+- Already-downloaded attachments are skipped when a stored local path exists.
+- Progress is shown for each download.
+- If you provide `--attachment`, you must also pass the email ID.
+
+Troubleshooting:
+- **No attachments found**: Confirm the message actually has attachments and that
+  you requested the correct email ID or filters.
+- **Large attachments missing content**: OutMyLook falls back to the Graph `$value`
+  endpoint for large files. If you still see "content is not available", retry
+  and confirm your Graph permissions allow attachment downloads.
+- **Download errors**: Verify the app has permission to write to
+  `storage.attachments_dir` and that the directory exists.
+- **Nothing happens for filters**: Use `fetch --unread --has-attachments` first
+  to populate the database, then run `download --unread --has-attachments`.
+
 ### Folder selection
 
 The following well-known folders are recognized (case-insensitive):

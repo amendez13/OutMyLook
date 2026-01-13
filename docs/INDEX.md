@@ -44,6 +44,7 @@ Welcome to the OutMyLook documentation. This index provides easy access to all d
 **[USAGE.md](USAGE.md)**
 - Authentication flow (login, status, logout)
 - Fetching email with pagination and folder selection
+- Downloading attachments and storage location
 - Configuration notes and troubleshooting
 
 ---
