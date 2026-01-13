@@ -488,10 +488,14 @@ class TestGraphAuthenticator:
         """Test logout."""
         authenticator._credential = Mock()
         authenticator._client = Mock()
+        auth_record_file = authenticator._auth_record_path()
+        auth_record_file.parent.mkdir(parents=True, exist_ok=True)
+        auth_record_file.write_text("record", encoding="utf-8")
 
         await authenticator.logout()
 
         authenticator.token_cache.clear.assert_called_once()
+        assert not auth_record_file.exists()
         assert authenticator._credential is None
         assert authenticator._client is None
 
@@ -546,7 +550,6 @@ class TestCachedTokenCredential:
         cache = Mock(spec=TokenCache)
         cache.has_valid_token.return_value = False
         cache.save_token = AsyncMock()
-        cache.load_token_sync.return_value = None
         # Add token_file attribute for cache_dir detection
         cache.token_file = tmp_path / "tokens.json"
         return cache
@@ -599,6 +602,36 @@ class TestCachedTokenCredential:
         assert mock_device_code.call_count == 1
         assert cred1 is cred2
 
+    def test_get_device_code_credential_uses_auth_record(self, tmp_path: Path, mock_token_cache: Mock) -> None:
+        """_get_device_code_credential should pass authentication_record when available."""
+        from azure.identity import AuthenticationRecord
+
+        from src.auth.authenticator import CachedTokenCredential
+
+        auth_record = AuthenticationRecord(
+            tenant_id="tenant",
+            client_id="client",
+            authority="login.microsoftonline.com",
+            home_account_id="home-id",
+            username="user@example.com",
+        )
+        auth_record_file = tmp_path / "auth_record.json"
+        auth_record_file.write_text(auth_record.serialize(), encoding="utf-8")
+
+        credential = CachedTokenCredential(
+            client_id="test-client-id",
+            tenant_id="test-tenant",
+            token_cache=mock_token_cache,
+            auth_record_file=auth_record_file,
+        )
+
+        with patch("src.auth.authenticator.DeviceCodeCredential") as mock_device_code:
+            mock_device_code.return_value = Mock()
+            credential._get_device_code_credential()
+
+        called_kwargs = mock_device_code.call_args.kwargs
+        assert called_kwargs["authentication_record"].username == "user@example.com"
+
     def test_get_token_delegates_to_azure_sdk(self, credential: "CachedTokenCredential") -> None:
         """Test get_token delegates to Azure SDK's DeviceCodeCredential."""
         with patch.object(credential, "_get_device_code_credential") as mock_get_cred:
@@ -613,22 +646,6 @@ class TestCachedTokenCredential:
             mock_get_cred.assert_called_once()
             mock_device_cred.get_token.assert_called_once()
 
-    def test_get_token_uses_cached_token(self, credential: "CachedTokenCredential", mock_token_cache: Mock) -> None:
-        """Test get_token returns cached token when valid."""
-        mock_token_cache.has_valid_token.return_value = True
-        mock_token_cache.load_token_sync.return_value = {
-            "access_token": "cached_token",
-            "expires_on": 123456,
-            "scopes": ["scope1", "scope2"],
-        }
-
-        with patch.object(credential, "_get_device_code_credential") as mock_get_cred:
-            token = credential.get_token("scope1")
-
-        assert token.token == "cached_token"
-        assert token.expires_on == 123456
-        mock_get_cred.assert_not_called()
-
     def test_get_token_updates_local_cache(self, credential: "CachedTokenCredential") -> None:
         """Test get_token updates our local cache after getting token from SDK."""
         with patch.object(credential, "_get_device_code_credential") as mock_get_cred:
@@ -642,6 +659,39 @@ class TestCachedTokenCredential:
                 assert token.token == "new_token"
                 mock_save.assert_called_once()
 
+    def test_get_token_persists_auth_record(self, tmp_path: Path, mock_token_cache: Mock) -> None:
+        """get_token should persist AuthenticationRecord when available."""
+        from azure.identity import AuthenticationRecord
+
+        from src.auth.authenticator import CachedTokenCredential
+
+        auth_record_file = tmp_path / "auth_record.json"
+        credential = CachedTokenCredential(
+            client_id="test-client-id",
+            tenant_id="test-tenant",
+            token_cache=mock_token_cache,
+            auth_record_file=auth_record_file,
+        )
+
+        auth_record = AuthenticationRecord(
+            tenant_id="tenant",
+            client_id="client",
+            authority="login.microsoftonline.com",
+            home_account_id="home-id",
+            username="user@example.com",
+        )
+
+        mock_device_cred = Mock()
+        mock_device_cred.get_token.return_value = Mock(token="new_token", expires_on=123456)
+        mock_device_cred._auth_record = auth_record
+
+        with patch.object(credential, "_get_device_code_credential", return_value=mock_device_cred):
+            credential.get_token("scope1")
+
+        assert auth_record_file.exists()
+        stored = AuthenticationRecord.deserialize(auth_record_file.read_text(encoding="utf-8"))
+        assert stored.username == "user@example.com"
+
     @patch("src.auth.authenticator.asyncio")
     def test_save_to_cache_with_event_loop(self, mock_asyncio: Mock, credential: "CachedTokenCredential") -> None:
         """Test _save_to_cache uses event loop when available."""
@@ -653,6 +703,28 @@ class TestCachedTokenCredential:
 
         mock_loop.create_task.assert_called_once()
 
+    def test_save_to_cache_without_token_cache(self) -> None:
+        """_save_to_cache should no-op when no TokenCache is configured."""
+        from src.auth.authenticator import CachedTokenCredential
+
+        credential = CachedTokenCredential(
+            client_id="test-client-id",
+            tenant_id="test-tenant",
+            token_cache=None,
+        )
+        token = Mock(token="new_token", expires_on=123456)
+        credential._save_to_cache(token, ["scope1"])
+
+    @patch("src.auth.authenticator.asyncio")
+    def test_save_to_cache_handles_exception(self, mock_asyncio: Mock, credential: "CachedTokenCredential") -> None:
+        """_save_to_cache should handle scheduling errors gracefully."""
+        mock_loop = Mock()
+        mock_loop.create_task.side_effect = RuntimeError("boom")
+        mock_asyncio.get_running_loop.return_value = mock_loop
+
+        token = Mock(token="new_token", expires_on=123456)
+        credential._save_to_cache(token, ["scope1"])
+
     @patch("src.auth.authenticator.asyncio")
     def test_save_to_cache_without_event_loop(self, mock_asyncio: Mock, credential: "CachedTokenCredential") -> None:
         """Test _save_to_cache uses asyncio.run when no event loop."""
@@ -662,6 +734,101 @@ class TestCachedTokenCredential:
         credential._save_to_cache(token, ["scope1"])
 
         mock_asyncio.run.assert_called_once()
+
+    def test_load_auth_record_invalid_returns_none(self, tmp_path: Path, mock_token_cache: Mock) -> None:
+        """Invalid auth record data should be ignored."""
+        from src.auth.authenticator import CachedTokenCredential
+
+        auth_record_file = tmp_path / "auth_record.json"
+        auth_record_file.write_text("not-json", encoding="utf-8")
+
+        credential = CachedTokenCredential(
+            client_id="test-client-id",
+            tenant_id="test-tenant",
+            token_cache=mock_token_cache,
+            auth_record_file=auth_record_file,
+        )
+
+        assert credential._auth_record is None
+
+    def test_persist_auth_record_skips_when_disabled(self, credential: "CachedTokenCredential") -> None:
+        """_persist_auth_record should no-op without a record file."""
+        mock_device = Mock()
+        credential._auth_record_file = None
+        credential._persist_auth_record(mock_device)
+
+    def test_persist_auth_record_skips_invalid_record(self, tmp_path: Path, mock_token_cache: Mock) -> None:
+        """_persist_auth_record should ignore invalid auth record types."""
+        from src.auth.authenticator import CachedTokenCredential
+
+        auth_record_file = tmp_path / "auth_record.json"
+        credential = CachedTokenCredential(
+            client_id="test-client-id",
+            tenant_id="test-tenant",
+            token_cache=mock_token_cache,
+            auth_record_file=auth_record_file,
+        )
+
+        mock_device = Mock()
+        mock_device._auth_record = "bad-record"
+        credential._persist_auth_record(mock_device)
+        assert not auth_record_file.exists()
+
+    def test_persist_auth_record_skips_duplicates(self, tmp_path: Path, mock_token_cache: Mock) -> None:
+        """_persist_auth_record should skip writing duplicate records."""
+        from azure.identity import AuthenticationRecord
+
+        from src.auth.authenticator import CachedTokenCredential
+
+        auth_record_file = tmp_path / "auth_record.json"
+        auth_record = AuthenticationRecord(
+            tenant_id="tenant",
+            client_id="client",
+            authority="login.microsoftonline.com",
+            home_account_id="home-id",
+            username="user@example.com",
+        )
+
+        credential = CachedTokenCredential(
+            client_id="test-client-id",
+            tenant_id="test-tenant",
+            token_cache=mock_token_cache,
+            auth_record_file=auth_record_file,
+        )
+        credential._auth_record = auth_record
+
+        mock_device = Mock()
+        mock_device._auth_record = auth_record
+        credential._persist_auth_record(mock_device)
+        assert not auth_record_file.exists()
+
+    def test_persist_auth_record_handles_write_failure(self, tmp_path: Path, mock_token_cache: Mock) -> None:
+        """_persist_auth_record should swallow write failures."""
+        from azure.identity import AuthenticationRecord
+
+        from src.auth.authenticator import CachedTokenCredential
+
+        auth_record_file = tmp_path / "auth_record.json"
+        credential = CachedTokenCredential(
+            client_id="test-client-id",
+            tenant_id="test-tenant",
+            token_cache=mock_token_cache,
+            auth_record_file=auth_record_file,
+        )
+
+        auth_record = AuthenticationRecord(
+            tenant_id="tenant",
+            client_id="client",
+            authority="login.microsoftonline.com",
+            home_account_id="home-id",
+            username="user@example.com",
+        )
+
+        mock_device = Mock()
+        mock_device._auth_record = auth_record
+
+        with patch.object(Path, "write_text", side_effect=RuntimeError("boom")):
+            credential._persist_auth_record(mock_device)
 
     def test_get_token_handles_cache_save_failure(self, credential: "CachedTokenCredential") -> None:
         """Test get_token handles cache save failures gracefully."""
