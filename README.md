@@ -21,7 +21,7 @@ A Python application for managing Microsoft Outlook emails using the Microsoft G
 - Python 3.10 or higher
 - pip (Python package installer)
 - Microsoft account (@outlook.com, @hotmail.com, @live.com, or organizational account)
-- Azure AD application registration (see [Setup Guide](docs/SETUP.md))
+- Azure AD application registration (see [Setup Guide](docs/SETUP.md) for step-by-step Azure setup)
 
 ## Installation
 
@@ -50,6 +50,9 @@ pip install -r requirements.txt
 cp config/config.example.yaml config/config.yaml
 # Edit config/config.yaml with your settings
 ```
+
+For a full Azure app registration walkthrough (Device Code Flow, permissions, and public client flows),
+see [docs/SETUP.md](docs/SETUP.md).
 
 ## Quick Start
 
