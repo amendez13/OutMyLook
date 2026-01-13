@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any, Callable, Iterable, Optional, TypedDict
 
@@ -26,6 +26,10 @@ from src.email import EmailClient, EmailFilter
 app = typer.Typer(help="OutMyLook - Microsoft Outlook email management tool")
 console = Console()
 logger = logging.getLogger(__name__)
+
+NOMINA_SENDER_DEFAULT = "noreply.laboral.bcn@bdo.es"
+NOMINA_SUBJECT_DEFAULT = "Hojas de Salario"
+NOMINA_BATCH_SIZE = 100
 
 
 @dataclass
@@ -410,6 +414,30 @@ def download(
     asyncio.run(_download_async(email_id, attachment_id, unread, has_attachments))
 
 
+@app.command("download-nomina")
+def download_nomina(
+    hours: Annotated[int, typer.Option("--hours", help="Look back this many hours")] = 24,
+    folder: Annotated[str, typer.Option("--folder", "-f", help="Mail folder to scan")] = "inbox",
+    sender: Annotated[str, typer.Option("--sender", help="Sender email address to match")] = NOMINA_SENDER_DEFAULT,
+    subject: Annotated[str, typer.Option("--subject", help="Subject text to match")] = NOMINA_SUBJECT_DEFAULT,
+) -> None:
+    """Download payroll attachments from recent emails."""
+    if hours <= 0:
+        raise typer.BadParameter("--hours must be greater than 0.")
+    sender_value = sender.strip()
+    subject_value = subject.strip()
+    if not sender_value and not subject_value:
+        raise typer.BadParameter("Provide --sender and/or --subject.")
+    asyncio.run(
+        _download_nomina_async(
+            hours,
+            folder,
+            sender_value or None,
+            subject_value or None,
+        )
+    )
+
+
 @app.command("list")
 def list_emails(
     limit: Annotated[Optional[int], typer.Option("--limit", "-l", help="Max emails to list")] = None,
@@ -505,6 +533,67 @@ async def _download_async(
         raise
     except Exception as e:
         _render_error("Download", "Error downloading attachments", e)
+        raise typer.Exit(code=1)
+
+
+async def _download_nomina_async(
+    hours: int,
+    folder: str,
+    sender: Optional[str],
+    subject: Optional[str],
+) -> None:
+    """Async implementation of download-nomina command."""
+    try:
+        settings = get_settings()
+        _setup_logging(settings)
+        settings.ensure_directories()
+        logger.debug(
+            "Starting download-nomina: hours=%s folder=%s sender=%s subject=%s",
+            hours,
+            folder,
+            sender,
+            subject,
+        )
+
+        token_cache = TokenCache(settings.storage.token_file)
+        authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
+        graph_client = await authenticator.get_client()
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        email_filter = EmailFilter().received_after(cutoff)
+
+        async with get_session(settings.database.url) as session:
+            email_repo = EmailRepository(session)
+            attachment_repo = AttachmentRepository(session)
+            email_client = EmailClient(graph_client, email_repository=email_repo)
+            attachment_handler = AttachmentHandler(
+                graph_client,
+                Path(settings.storage.attachments_dir),
+                attachment_repo,
+            )
+
+            emails = await _fetch_recent_emails(email_client, folder, email_filter)
+            matched = _filter_nomina_emails(emails, hours=hours, sender=sender, subject=subject)
+            if not matched:
+                return
+
+            total_downloaded = await _download_nomina_attachments(attachment_handler, matched)
+            _render_nomina_summary(total_downloaded, len(matched))
+
+    except AuthenticationError as e:
+        _console_print(
+            Panel.fit(
+                f"Authentication failed\n\n{str(e)}\n\nRun 'outmylook login' to authenticate.",
+                title="Authentication Required",
+                border_style="red",
+            ),
+            level="error",
+        )
+        raise typer.Exit(code=1)
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        _render_error("Download Nomina", "Error downloading payroll attachments", e)
         raise typer.Exit(code=1)
 
 
@@ -809,6 +898,117 @@ def _normalize_graph_id(value: Optional[str]) -> Optional[str]:
         return None
     normalized = "".join(value.split())
     return normalized or None
+
+
+async def _fetch_recent_emails(
+    email_client: EmailClient,
+    folder: str,
+    email_filter: EmailFilter,
+) -> list[Any]:
+    emails: list[Any] = []
+    skip = 0
+    while True:
+        batch = await email_client.list_emails(
+            folder=folder,
+            limit=NOMINA_BATCH_SIZE,
+            skip=skip,
+            email_filter=email_filter,
+        )
+        if not batch:
+            break
+        emails.extend(batch)
+        if len(batch) < NOMINA_BATCH_SIZE:
+            break
+        skip += NOMINA_BATCH_SIZE
+    return emails
+
+
+def _matches_nomina_criteria(email: Any, *, sender: Optional[str], subject: Optional[str]) -> bool:
+    sender_obj = getattr(email, "sender", None)
+    sender_value = getattr(sender_obj, "address", "") if sender_obj is not None else ""
+    subject_value = getattr(email, "subject", "") or ""
+    sender_match = sender and sender_value.lower() == sender.lower()
+    subject_match = subject and subject.casefold() in subject_value.casefold()
+    return bool(sender_match or subject_match)
+
+
+def _format_nomina_date(received_at: datetime) -> str:
+    if received_at.tzinfo is None:
+        received_at = received_at.replace(tzinfo=timezone.utc)
+    return received_at.date().strftime("%Y_%m_%d")
+
+
+def _render_nomina_empty(message: str) -> None:
+    _console_print(
+        Panel.fit(message, title="Download Nomina", border_style="yellow"),
+        level="summary",
+    )
+
+
+def _render_nomina_summary(downloaded: int, matched: int) -> None:
+    _console_print(
+        Panel.fit(
+            f"✓ Downloaded {downloaded} attachment(s) from {matched} email(s).",
+            title="Download Nomina",
+            border_style="green",
+        ),
+        level="summary",
+    )
+
+
+def _filter_nomina_emails(
+    emails: list[Any],
+    *,
+    hours: int,
+    sender: Optional[str],
+    subject: Optional[str],
+) -> list[Any]:
+    if not emails:
+        _render_nomina_empty(f"No emails received in the last {hours} hours.")
+        return []
+    matched = [email for email in emails if _matches_nomina_criteria(email, sender=sender, subject=subject)]
+    if not matched:
+        _render_nomina_empty(f"No matching emails found in the last {hours} hours.")
+    return matched
+
+
+async def _download_nomina_attachments(handler: AttachmentHandler, emails: list[Any]) -> int:
+    total_downloaded = 0
+    for email in emails:
+        subject_line = email.subject or "(no subject)"
+        if not email.has_attachments:
+            if not _OUTPUT.quiet:
+                _console_print(f"No attachments for {subject_line}", level="summary")
+            continue
+        paths = await handler.download_all_for_email(email.id)
+        renamed = [_rename_nomina_attachment(path, email.received_at) for path in paths]
+        total_downloaded += len(renamed)
+        if not _OUTPUT.quiet:
+            _console_print(
+                f"Downloaded {len(renamed)} attachment(s) for {subject_line}",
+                level="summary",
+            )
+    return total_downloaded
+
+
+def _ensure_unique_name(parent: Path, base: str, suffix: str) -> Path:
+    candidate = parent / f"{base}{suffix}"
+    if not candidate.exists():
+        return candidate
+    for counter in range(1, 1000):
+        candidate = parent / f"{base}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"Unable to resolve unique filename for {base}{suffix}")
+
+
+def _rename_nomina_attachment(path: Path, received_at: datetime) -> Path:
+    base = f"Nomina_{_format_nomina_date(received_at)}"
+    if path.stem.startswith(base):
+        return path
+    target = _ensure_unique_name(path.parent, base, path.suffix)
+    path.rename(target)
+    return target
 
 
 def _emit_email_ids(emails: Iterable[Any]) -> None:
