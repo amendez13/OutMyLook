@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class OutputOptions:
+    """Track global output flags for the CLI."""
+
     verbose: bool = False
     quiet: bool = False
 
@@ -38,6 +40,8 @@ _OUTPUT = OutputOptions()
 
 
 class EmailSearchFilters(TypedDict):
+    """Typed dictionary for local email search filters."""
+
     sender: Optional[str]
     subject: Optional[str]
     date_from: Optional[datetime]
