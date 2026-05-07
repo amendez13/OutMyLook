@@ -623,6 +623,118 @@ def test_download_filters_no_matches() -> None:
         mock_console.print.assert_called()
 
 
+def test_move_moves_all_matches_and_skips_already_in_destination() -> None:
+    """move should collect matches, create the folder if needed, and move each candidate."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    destination_folder = MagicMock(id="folder-dst", display_name="Pre-Delete Temp")
+    email_one = Email(
+        id="email-1",
+        subject="CI",
+        sender=EmailAddress(address="ci_activity@noreply.github.com"),
+        received_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        body_preview="",
+        is_read=False,
+        has_attachments=False,
+        folder_id="inbox",
+    )
+    email_two = Email(
+        id="email-2",
+        subject="CI",
+        sender=EmailAddress(address="ci_activity@noreply.github.com"),
+        received_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
+        body_preview="",
+        is_read=False,
+        has_attachments=False,
+        folder_id="folder-dst",
+    )
+    email_client_instance = MagicMock()
+    email_client_instance.get_folder = AsyncMock(return_value=None)
+    email_client_instance.ensure_folder = AsyncMock(return_value=destination_folder)
+    email_client_instance.list_emails = AsyncMock(side_effect=[[email_one, email_two], []])
+    email_client_instance.move_email = AsyncMock()
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailClient", return_value=email_client_instance),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+
+        commands.move(destination="Pre-Delete Temp", from_address="ci_activity@noreply.github.com")
+
+        email_client_instance.ensure_folder.assert_awaited_once_with("Pre-Delete Temp")
+        email_client_instance.move_email.assert_awaited_once_with("email-1", "folder-dst")
+        mock_console.print.assert_called()
+
+
+def test_move_no_matches_reports_summary() -> None:
+    """move should report when no emails match the requested filters."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    destination_folder = MagicMock(id="folder-dst", display_name="Pre-Delete Temp")
+    email_client_instance = MagicMock()
+    email_client_instance.get_folder = AsyncMock(return_value=None)
+    email_client_instance.ensure_folder = AsyncMock(return_value=destination_folder)
+    email_client_instance.list_emails = AsyncMock(return_value=[])
+    email_client_instance.move_email = AsyncMock()
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailClient", return_value=email_client_instance),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+
+        commands.move(destination="Pre-Delete Temp", from_address="ci_activity@noreply.github.com")
+
+        email_client_instance.move_email.assert_not_awaited()
+        mock_console.print.assert_called()
+
+
+def test_move_uses_existing_folder_id_without_creating_new_folder() -> None:
+    """move should treat an existing Graph folder ID as the destination."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    destination_folder = MagicMock(id="folder-dst", display_name="Nested Folder")
+    email_client_instance = MagicMock()
+    email_client_instance.get_folder = AsyncMock(return_value=destination_folder)
+    email_client_instance.ensure_folder = AsyncMock()
+    email_client_instance.list_emails = AsyncMock(return_value=[])
+    email_client_instance.move_email = AsyncMock()
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailClient", return_value=email_client_instance),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+
+        commands.move(destination="AQMk-folder-id", from_address="sender@example.com")
+
+        email_client_instance.get_folder.assert_awaited_once_with("AQMk-folder-id")
+        email_client_instance.ensure_folder.assert_not_awaited()
+        mock_console.print.assert_called()
+
+
 def test_build_email_filter_returns_none_when_no_filters() -> None:
     """_build_email_filter should return None when no filters are provided."""
     result = commands._build_email_filter(

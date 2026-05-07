@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from importlib import import_module
 from typing import Any, Optional, cast
 
+from kiota_abstractions.method import Method
+from kiota_abstractions.request_information import RequestInformation
 from msgraph import GraphServiceClient
 
 from src.database.repository import EmailRepository
@@ -24,16 +27,21 @@ class EmailClient:
 
     async def list_emails(
         self,
-        folder: str = "inbox",
+        folder: Optional[str] = "inbox",
         limit: int = 25,
         skip: int = 0,
         email_filter: Optional[EmailFilter] = None,
     ) -> list[Email]:
-        """Fetch emails from a folder with pagination."""
-        folder_id = await self._resolve_folder_id(folder)
-        messages_request = self._get_folder_messages_request(folder_id)
+        """Fetch emails from a folder or the whole mailbox with pagination."""
+        folder_id = await self._resolve_folder_id(folder) if folder is not None else None
+        messages_request = self._get_messages_request(folder_id)
         filter_query = email_filter.build() if email_filter else None
-        request_configuration = self._build_messages_request_config(limit=limit, skip=skip, filter_query=filter_query)
+        request_configuration = self._build_messages_request_config(
+            limit=limit,
+            skip=skip,
+            filter_query=filter_query,
+            include_orderby=folder_id is not None,
+        )
 
         if request_configuration is not None:
             response = await messages_request.get(request_configuration=request_configuration)
@@ -50,6 +58,52 @@ class EmailClient:
         if self._email_repository and emails:
             await self._email_repository.save_many(emails)
         return emails
+
+    async def ensure_folder(self, display_name: str) -> MailFolder:
+        """Return an existing top-level folder or create it when missing."""
+        normalized = display_name.strip()
+        if not normalized:
+            raise ValueError("Folder name cannot be empty.")
+
+        folders = await self.list_folders()
+        for folder in folders:
+            if folder.display_name.strip().lower() == normalized.lower():
+                return folder
+
+        created = await self._create_folder(normalized)
+        if created.display_name.strip().lower() == normalized.lower():
+            return created
+
+        raise ValueError(f"Folder '{normalized}' was created but returned unexpected metadata.")
+
+    async def get_folder(self, folder_id: str) -> Optional[MailFolder]:
+        """Return a folder by Graph ID when it exists."""
+        normalized = folder_id.strip()
+        if not normalized:
+            raise ValueError("Folder ID cannot be empty.")
+
+        mail_folders = self._graph_client.me.mail_folders
+        if hasattr(mail_folders, "by_id"):
+            folder_request = mail_folders.by_id(normalized)
+        else:
+            folder_request = mail_folders.by_mail_folder_id(normalized)
+
+        try:
+            folder = await folder_request.get()
+        except Exception:
+            return None
+        if folder is None:
+            return None
+        return MailFolder.from_graph_folder(folder)
+
+    async def move_email(self, message_id: str, destination_folder: str) -> None:
+        """Move a message into the destination folder."""
+        destination_id = await self._resolve_folder_id(destination_folder)
+        await self._post_json(
+            "{+baseurl}/me/messages/{message%2Did}/move",
+            {"message%2Did": message_id},
+            {"destinationId": destination_id},
+        )
 
     async def get_email(self, message_id: str) -> Email:
         """Fetch a single email by ID."""
@@ -101,6 +155,11 @@ class EmailClient:
 
         return folder
 
+    def _get_messages_request(self, folder_id: Optional[str]) -> Any:
+        if folder_id is None:
+            return self._graph_client.me.messages
+        return self._get_folder_messages_request(folder_id)
+
     def _get_folder_messages_request(self, folder_id: str) -> Any:
         mail_folders = self._graph_client.me.mail_folders
         if hasattr(mail_folders, "by_id"):
@@ -109,7 +168,55 @@ class EmailClient:
             folder_request = mail_folders.by_mail_folder_id(folder_id)
         return folder_request.messages
 
-    def _build_messages_request_config(self, limit: int, skip: int, filter_query: Optional[str] = None) -> Optional[Any]:
+    async def _create_folder(self, display_name: str) -> MailFolder:
+        response = await self._post_json(
+            "{+baseurl}/me/mailFolders",
+            {},
+            {"displayName": display_name},
+        )
+        if not response:
+            raise ValueError(f"Folder '{display_name}' was created but Microsoft Graph returned no payload.")
+        return MailFolder.from_graph_folder(response)
+
+    async def _post_json(
+        self,
+        url_template: str,
+        path_parameters: dict[str, str],
+        payload: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        request_adapter = getattr(self._graph_client, "request_adapter", None)
+        if request_adapter is None:
+            raise ValueError("Graph client does not expose a request adapter.")
+
+        request_info = RequestInformation(
+            Method.POST,
+            url_template,
+            path_parameters,
+        )
+        request_info.headers.try_add("Accept", "application/json")
+        request_info.set_stream_content(
+            json.dumps(payload).encode("utf-8"),
+            "application/json",
+        )
+        response = await request_adapter.send_primitive_async(request_info, "bytes", None)
+        if response is None:
+            return None
+        if isinstance(response, bytearray):
+            response = bytes(response)
+        if isinstance(response, bytes):
+            text = response.decode("utf-8").strip()
+            if not text:
+                return None
+            return cast(dict[str, Any], json.loads(text))
+        raise TypeError("Unsupported response payload type")
+
+    def _build_messages_request_config(
+        self,
+        limit: int,
+        skip: int,
+        filter_query: Optional[str] = None,
+        include_orderby: bool = True,
+    ) -> Optional[Any]:
         builder = self._import_builder(
             [
                 "msgraph.generated.users.item.mail_folders.item.messages.messages_request_builder",
@@ -136,7 +243,7 @@ class EmailClient:
                 "hasAttachments",
                 "parentFolderId",
             ],
-            orderby=["receivedDateTime desc"],
+            orderby=["receivedDateTime desc"] if include_orderby else None,
         )
         return builder.MessagesRequestBuilderGetRequestConfiguration(query_parameters=query_params)
 
@@ -149,6 +256,7 @@ class EmailClient:
             return None
 
         query_params = builder.MailFoldersRequestBuilderGetQueryParameters(
+            top=200,
             select=[
                 "id",
                 "displayName",
@@ -156,7 +264,7 @@ class EmailClient:
                 "childFolderCount",
                 "totalItemCount",
                 "unreadItemCount",
-            ]
+            ],
         )
         return builder.MailFoldersRequestBuilderGetRequestConfiguration(query_parameters=query_params)
 

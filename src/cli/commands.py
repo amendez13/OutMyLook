@@ -22,6 +22,7 @@ from src.config.settings import Settings, get_settings
 from src.database.models import EmailModel
 from src.database.repository import AttachmentRepository, EmailRepository, get_session
 from src.email import EmailClient, EmailFilter
+from src.email.models import Email
 
 app = typer.Typer(help="OutMyLook - Microsoft Outlook email management tool")
 console = Console()
@@ -410,6 +411,35 @@ def download(
     asyncio.run(_download_async(email_id, attachment_id, unread, has_attachments))
 
 
+@app.command()
+def move(
+    destination: Annotated[str, typer.Argument(help="Destination folder name or ID")],
+    folder: Annotated[
+        Optional[str],
+        typer.Option("--folder", "-f", help="Optional source folder. When omitted, search the whole mailbox."),
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Batch size for collecting matches")] = 100,
+    from_address: Annotated[Optional[str], typer.Option("--from", help="Filter by sender email address")] = None,
+    subject: Annotated[Optional[str], typer.Option("--subject", help="Filter by subject containing text")] = None,
+    after: Annotated[Optional[str], typer.Option("--after", help="Filter by received date (YYYY-MM-DD or ISO-8601)")] = None,
+    before: Annotated[Optional[str], typer.Option("--before", help="Filter by received date (YYYY-MM-DD or ISO-8601)")] = None,
+    unread: Annotated[bool, typer.Option("--unread", help="Filter to unread emails only")] = False,
+    read: Annotated[bool, typer.Option("--read", help="Filter to read emails only")] = False,
+    has_attachments: Annotated[bool, typer.Option("--has-attachments", help="Filter to emails with attachments")] = False,
+) -> None:
+    """Move matching emails into a destination folder."""
+    email_filter = _build_email_filter(
+        from_address=from_address,
+        subject=subject,
+        after=after,
+        before=before,
+        unread=unread,
+        read=read,
+        has_attachments=has_attachments,
+    )
+    asyncio.run(_move_async(destination, folder, limit, email_filter))
+
+
 @app.command("list")
 def list_emails(
     limit: Annotated[Optional[int], typer.Option("--limit", "-l", help="Max emails to list")] = None,
@@ -720,6 +750,110 @@ async def _download_for_filtered_emails(handler: AttachmentHandler, emails: list
         ),
         level="summary",
     )
+
+
+async def _move_async(
+    destination: str,
+    folder: Optional[str],
+    limit: int,
+    email_filter: Optional[EmailFilter],
+) -> None:
+    """Async implementation of move command."""
+    try:
+        destination_value = destination.strip()
+        if not destination_value:
+            raise typer.BadParameter("Destination folder cannot be empty.")
+        if limit <= 0:
+            raise typer.BadParameter("--limit must be greater than 0.")
+
+        settings = get_settings()
+        _setup_logging(settings)
+        settings.ensure_directories()
+
+        token_cache = TokenCache(settings.storage.token_file)
+        authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
+        graph_client = await authenticator.get_client()
+        email_client = EmailClient(graph_client)
+
+        existing_folder = await email_client.get_folder(destination_value)
+        destination_folder = existing_folder or await email_client.ensure_folder(destination_value)
+        matches = await _collect_move_candidates(
+            email_client=email_client,
+            folder=folder,
+            limit=limit,
+            email_filter=email_filter,
+            destination_folder_id=destination_folder.id,
+        )
+
+        if not matches:
+            scope = folder or "mailbox"
+            _console_print(
+                Panel.fit(
+                    f"No emails matched the requested filters in '{scope}'.",
+                    title="Move",
+                    border_style="yellow",
+                ),
+                level="summary",
+            )
+            return
+
+        for email in matches:
+            await email_client.move_email(email.id, destination_folder.id)
+
+        _console_print(
+            Panel.fit(
+                f"✓ Moved {len(matches)} email(s) to '{destination_folder.display_name}'.",
+                title="Move",
+                border_style="green",
+            ),
+            level="summary",
+        )
+
+    except AuthenticationError as e:
+        _console_print(
+            Panel.fit(
+                f"Authentication failed\n\n{str(e)}\n\nRun 'outmylook login' to authenticate.",
+                title="Authentication Required",
+                border_style="red",
+            ),
+            level="error",
+        )
+        raise typer.Exit(code=1)
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        _render_error("Move", "Error moving emails", e)
+        raise typer.Exit(code=1)
+
+
+async def _collect_move_candidates(
+    *,
+    email_client: EmailClient,
+    folder: Optional[str],
+    limit: int,
+    email_filter: Optional[EmailFilter],
+    destination_folder_id: str,
+) -> list[Email]:
+    """Collect all matching emails before moving them."""
+    matches: list[Email] = []
+    offset = 0
+
+    while True:
+        batch = await email_client.list_emails(
+            folder=folder,
+            limit=limit,
+            skip=offset,
+            email_filter=email_filter,
+        )
+        if not batch:
+            break
+
+        matches.extend(email for email in batch if email.folder_id != destination_folder_id)
+        if len(batch) < limit:
+            break
+        offset += len(batch)
+
+    return matches
 
 
 def _build_local_filters(
