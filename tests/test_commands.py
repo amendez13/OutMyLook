@@ -61,7 +61,7 @@ def test_status_authenticated_shows_token_info() -> None:
         return_value={
             "expires_at": "2026-01-01T00:00:00+00:00",
             "seconds_until_expiry": 3600,
-            "scopes": ["Mail.Read"],
+            "scopes": ["Mail.ReadWrite"],
             "cached_at": "2026-01-01T00:00:00+00:00",
         }
     )
@@ -133,7 +133,7 @@ def test_login_already_authenticated_no_reauth() -> None:
     mock_token_cache = MagicMock()
     mock_token_cache.has_valid_token.return_value = True
     mock_token_cache.get_token_info = AsyncMock(
-        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.Read"]}
+        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.ReadWrite"]}
     )
 
     with (
@@ -153,7 +153,7 @@ def test_login_already_authenticated_reauth_and_success() -> None:
     mock_token_cache = MagicMock()
     mock_token_cache.has_valid_token.return_value = True
     mock_token_cache.get_token_info = AsyncMock(
-        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.Read"]}
+        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.ReadWrite"]}
     )
     mock_token_cache.clear = AsyncMock()
 
@@ -240,7 +240,7 @@ def test_status_expiring_soon_shows_note() -> None:
         return_value={
             "expires_at": "2026-01-01T00:00:00+00:00",
             "seconds_until_expiry": 10,
-            "scopes": ["Mail.Read"],
+            "scopes": ["Mail.ReadWrite"],
             "cached_at": "2026-01-01T00:00:00+00:00",
         }
     )

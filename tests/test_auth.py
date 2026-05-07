@@ -35,7 +35,7 @@ class TestTokenCache:
         """Test saving token to cache."""
         access_token = "test_token_123"
         expires_on = int(datetime.now(timezone.utc).timestamp()) + 3600
-        scopes = ["Mail.Read", "User.Read"]
+        scopes = ["Mail.ReadWrite", "User.Read"]
 
         await token_cache.save_token(access_token, expires_on, scopes)
 
@@ -60,7 +60,7 @@ class TestTokenCache:
         test_data = {
             "access_token": "test_token",
             "expires_on": int(datetime.now(timezone.utc).timestamp()) + 3600,
-            "scopes": ["Mail.Read"],
+            "scopes": ["Mail.ReadWrite"],
             "cached_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -94,7 +94,7 @@ class TestTokenCache:
         expired_data = {
             "access_token": "token",
             "expires_on": int(datetime.now(timezone.utc).timestamp()) - 100,  # Expired
-            "scopes": ["Mail.Read"],
+            "scopes": ["Mail.ReadWrite"],
         }
 
         with open(token_file, "w") as f:
@@ -108,7 +108,7 @@ class TestTokenCache:
         expires_soon_data = {
             "access_token": "token",
             "expires_on": int(datetime.now(timezone.utc).timestamp()) + 120,
-            "scopes": ["Mail.Read"],
+            "scopes": ["Mail.ReadWrite"],
         }
 
         with open(token_file, "w") as f:
@@ -121,7 +121,7 @@ class TestTokenCache:
         valid_data = {
             "access_token": "token",
             "expires_on": int(datetime.now(timezone.utc).timestamp()) + 3600,  # 1 hour
-            "scopes": ["Mail.Read"],
+            "scopes": ["Mail.ReadWrite"],
         }
 
         with open(token_file, "w") as f:
@@ -163,7 +163,7 @@ class TestTokenCache:
         valid_data = {
             "access_token": "test_token_123",
             "expires_on": int(datetime.now(timezone.utc).timestamp()) + 3600,
-            "scopes": ["Mail.Read"],
+            "scopes": ["Mail.ReadWrite"],
         }
 
         with open(token_file, "w") as f:
@@ -187,7 +187,7 @@ class TestTokenCache:
         valid_data = {
             "access_token": "token",
             "expires_on": expires_on,
-            "scopes": ["Mail.Read", "User.Read"],
+            "scopes": ["Mail.ReadWrite", "User.Read"],
             "cached_at": cached_at,
         }
 
@@ -199,7 +199,7 @@ class TestTokenCache:
         assert info is not None
         assert info["expires_on"] == expires_on
         assert "expires_at" in info
-        assert info["scopes"] == ["Mail.Read", "User.Read"]
+        assert info["scopes"] == ["Mail.ReadWrite", "User.Read"]
         assert info["cached_at"] == cached_at
         assert info["seconds_until_expiry"] > 0
 
@@ -249,7 +249,7 @@ class TestGraphAuthenticator:
         return AzureSettings(
             client_id="test-client-id",
             tenant="common",
-            scopes=["Mail.Read", "User.Read", "offline_access"],
+            scopes=["Mail.ReadWrite", "User.Read", "offline_access"],
         )
 
     @pytest.fixture
@@ -277,13 +277,13 @@ class TestGraphAuthenticator:
         """Test GraphAuthenticator initialization."""
         assert authenticator.client_id == "test-client-id"
         assert authenticator.tenant == "common"
-        assert "Mail.Read" in authenticator.scopes
+        assert "Mail.ReadWrite" in authenticator.scopes
         assert authenticator.token_cache is not None
 
     def test_init_default_scopes(self) -> None:
         """Test GraphAuthenticator with default scopes."""
         auth = GraphAuthenticator(client_id="test-client-id")
-        assert "https://graph.microsoft.com/Mail.Read" in auth.scopes
+        assert "https://graph.microsoft.com/Mail.ReadWrite" in auth.scopes
         assert "https://graph.microsoft.com/User.Read" in auth.scopes
         assert "offline_access" in auth.scopes
 

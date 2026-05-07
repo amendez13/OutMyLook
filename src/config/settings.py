@@ -24,7 +24,7 @@ class AzureSettings(BaseSettings):
     )
     scopes: List[str] = Field(
         default_factory=lambda: [
-            "https://graph.microsoft.com/Mail.Read",
+            "https://graph.microsoft.com/Mail.ReadWrite",
             "https://graph.microsoft.com/User.Read",
             "offline_access",
         ],

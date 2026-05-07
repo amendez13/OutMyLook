@@ -148,7 +148,7 @@ azure:
   client_id: "your-azure-app-client-id"
   tenant: "common"
   scopes:
-    - "https://graph.microsoft.com/Mail.Read"
+    - "https://graph.microsoft.com/Mail.ReadWrite"
     - "https://graph.microsoft.com/User.Read"
     - "offline_access"
 
@@ -179,7 +179,7 @@ For database setup and migrations, see [Database Guide](docs/DATABASE.md).
 - **Login output is noisy (HTTP polling spam)**: Set `logging.level` to `WARNING` in `config/config.yaml` or run with `LOGGING_LEVEL=WARNING`, then retry `login`.
 - **Token cache/auth record is stale**: Delete `~/.outmylook/auth_record.json` (and optionally `storage.token_file`) and re-run `login`.
 - **SQLite database is locked**: Make sure no other process is using the DB; restart any running fetch/list/export commands.
-- **Attachments not downloading**: Confirm the `Mail.Read` scope is present and the email actually has attachments.
+- **Attachments not downloading**: Confirm the app has a mail scope such as `Mail.ReadWrite` and the email actually has attachments.
 
 ## Project Structure
 

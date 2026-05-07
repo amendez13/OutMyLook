@@ -301,7 +301,7 @@ OutMyLook is a Python application for managing Microsoft Outlook emails using th
 
 ### Best Practices
 
-- **Minimal Scopes**: Request only necessary Microsoft Graph API scopes (Mail.Read, User.Read)
+- **Minimal Scopes**: Request only necessary Microsoft Graph API scopes (Mail.ReadWrite, User.Read)
 - **Token Validation**: Check token expiration before use with 5-minute buffer
 - **Error Handling**: Authentication errors caught and reported clearly to users
 - **Logging**: Sensitive data (tokens, credentials) never logged
