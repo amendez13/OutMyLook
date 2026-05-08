@@ -479,6 +479,64 @@ async def test_move_email_posts_move_request() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_folder_prefers_existing_graph_folder_id() -> None:
+    """resolve_folder should return an existing folder when the input is a Graph ID."""
+    client = EmailClient(MagicMock())
+    folder = MailFolder(id="folder-1", display_name="Nested")
+
+    with (
+        patch.object(client, "get_folder", AsyncMock(return_value=folder)) as get_folder,
+        patch.object(client, "_resolve_folder_id", AsyncMock()) as resolve_folder_id,
+        patch.object(client, "ensure_folder", AsyncMock()) as ensure_folder,
+    ):
+        resolved = await client.resolve_folder("folder-1")
+
+    get_folder.assert_awaited_once_with("folder-1")
+    resolve_folder_id.assert_not_awaited()
+    ensure_folder.assert_not_awaited()
+    assert resolved is folder
+
+
+@pytest.mark.asyncio
+async def test_resolve_folder_uses_well_known_alias_before_creating() -> None:
+    """resolve_folder should use resolved well-known aliases before creating folders."""
+    client = EmailClient(MagicMock())
+    deleted_items = MailFolder(id="deleteditems", display_name="Deleted Items")
+
+    with (
+        patch.object(client, "get_folder", AsyncMock(side_effect=[None, deleted_items])) as get_folder,
+        patch.object(client, "_resolve_folder_id", AsyncMock(return_value="deleteditems")) as resolve_folder_id,
+        patch.object(client, "ensure_folder", AsyncMock()) as ensure_folder,
+    ):
+        resolved = await client.resolve_folder("deleted")
+
+    assert get_folder.await_args_list[0].args == ("deleted",)
+    assert get_folder.await_args_list[1].args == ("deleteditems",)
+    resolve_folder_id.assert_awaited_once_with("deleted")
+    ensure_folder.assert_not_awaited()
+    assert resolved is deleted_items
+
+
+@pytest.mark.asyncio
+async def test_resolve_folder_creates_when_no_existing_folder_matches() -> None:
+    """resolve_folder should create a folder only when nothing resolves."""
+    client = EmailClient(MagicMock())
+    created_folder = MailFolder(id="folder-2", display_name="Pre-Delete")
+
+    with (
+        patch.object(client, "get_folder", AsyncMock(return_value=None)) as get_folder,
+        patch.object(client, "_resolve_folder_id", AsyncMock(return_value="Pre-Delete")) as resolve_folder_id,
+        patch.object(client, "ensure_folder", AsyncMock(return_value=created_folder)) as ensure_folder,
+    ):
+        resolved = await client.resolve_folder("Pre-Delete")
+
+    get_folder.assert_awaited_once_with("Pre-Delete")
+    resolve_folder_id.assert_awaited_once_with("Pre-Delete")
+    ensure_folder.assert_awaited_once_with("Pre-Delete")
+    assert resolved is created_folder
+
+
+@pytest.mark.asyncio
 async def test_get_folder_returns_model() -> None:
     """get_folder should fetch and map a folder by Graph ID."""
     graph_client = MagicMock()

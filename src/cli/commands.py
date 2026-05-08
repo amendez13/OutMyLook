@@ -775,8 +775,7 @@ async def _move_async(
         graph_client = await authenticator.get_client()
         email_client = EmailClient(graph_client)
 
-        existing_folder = await email_client.get_folder(destination_value)
-        destination_folder = existing_folder or await email_client.ensure_folder(destination_value)
+        destination_folder = await email_client.resolve_folder(destination_value)
         matches = await _collect_move_candidates(
             email_client=email_client,
             folder=folder,

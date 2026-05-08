@@ -96,6 +96,30 @@ class EmailClient:
             return None
         return MailFolder.from_graph_folder(folder)
 
+    async def resolve_folder(self, folder: str) -> MailFolder:
+        """Resolve a folder name or ID to concrete folder metadata.
+
+        Well-known aliases such as ``deleted`` and ``sent`` should resolve to
+        their built-in Graph folders instead of being treated as custom names.
+        When no existing folder can be resolved, create a new top-level folder
+        using the provided display name.
+        """
+        normalized = folder.strip()
+        if not normalized:
+            raise ValueError("Folder cannot be empty.")
+
+        existing_folder = await self.get_folder(normalized)
+        if existing_folder is not None:
+            return existing_folder
+
+        resolved_id = await self._resolve_folder_id(normalized)
+        if resolved_id != normalized:
+            resolved_folder = await self.get_folder(resolved_id)
+            if resolved_folder is not None:
+                return resolved_folder
+
+        return await self.ensure_folder(normalized)
+
     async def move_email(self, message_id: str, destination_folder: str) -> None:
         """Move a message into the destination folder."""
         destination_id = await self._resolve_folder_id(destination_folder)
