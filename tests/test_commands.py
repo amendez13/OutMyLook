@@ -61,7 +61,7 @@ def test_status_authenticated_shows_token_info() -> None:
         return_value={
             "expires_at": "2026-01-01T00:00:00+00:00",
             "seconds_until_expiry": 3600,
-            "scopes": ["Mail.Read"],
+            "scopes": ["Mail.ReadWrite"],
             "cached_at": "2026-01-01T00:00:00+00:00",
         }
     )
@@ -133,7 +133,7 @@ def test_login_already_authenticated_no_reauth() -> None:
     mock_token_cache = MagicMock()
     mock_token_cache.has_valid_token.return_value = True
     mock_token_cache.get_token_info = AsyncMock(
-        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.Read"]}
+        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.ReadWrite"]}
     )
 
     with (
@@ -153,7 +153,7 @@ def test_login_already_authenticated_reauth_and_success() -> None:
     mock_token_cache = MagicMock()
     mock_token_cache.has_valid_token.return_value = True
     mock_token_cache.get_token_info = AsyncMock(
-        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.Read"]}
+        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.ReadWrite"]}
     )
     mock_token_cache.clear = AsyncMock()
 
@@ -240,7 +240,7 @@ def test_status_expiring_soon_shows_note() -> None:
         return_value={
             "expires_at": "2026-01-01T00:00:00+00:00",
             "seconds_until_expiry": 10,
-            "scopes": ["Mail.Read"],
+            "scopes": ["Mail.ReadWrite"],
             "cached_at": "2026-01-01T00:00:00+00:00",
         }
     )
@@ -620,6 +620,144 @@ def test_download_filters_no_matches() -> None:
 
         email_repo_instance.search.assert_awaited_once_with(is_read=False, has_attachments=True)
         handler_instance.download_all_for_email.assert_not_called()
+        mock_console.print.assert_called()
+
+
+def test_move_moves_all_matches_and_skips_already_in_destination() -> None:
+    """move should resolve the destination folder and move each candidate."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    destination_folder = MagicMock(id="folder-dst", display_name="Pre-Delete Temp")
+    email_one = Email(
+        id="email-1",
+        subject="CI",
+        sender=EmailAddress(address="ci_activity@noreply.github.com"),
+        received_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        body_preview="",
+        is_read=False,
+        has_attachments=False,
+        folder_id="inbox",
+    )
+    email_two = Email(
+        id="email-2",
+        subject="CI",
+        sender=EmailAddress(address="ci_activity@noreply.github.com"),
+        received_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
+        body_preview="",
+        is_read=False,
+        has_attachments=False,
+        folder_id="folder-dst",
+    )
+    email_client_instance = MagicMock()
+    email_client_instance.resolve_folder = AsyncMock(return_value=destination_folder)
+    email_client_instance.list_emails = AsyncMock(side_effect=[[email_one, email_two], []])
+    email_client_instance.move_email = AsyncMock()
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailClient", return_value=email_client_instance),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+
+        commands.move(destination="Pre-Delete Temp", from_address="ci_activity@noreply.github.com")
+
+        email_client_instance.resolve_folder.assert_awaited_once_with("Pre-Delete Temp")
+        email_client_instance.move_email.assert_awaited_once_with("email-1", "folder-dst")
+        mock_console.print.assert_called()
+
+
+def test_move_no_matches_reports_summary() -> None:
+    """move should report when no emails match the requested filters."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    destination_folder = MagicMock(id="folder-dst", display_name="Pre-Delete Temp")
+    email_client_instance = MagicMock()
+    email_client_instance.resolve_folder = AsyncMock(return_value=destination_folder)
+    email_client_instance.list_emails = AsyncMock(return_value=[])
+    email_client_instance.move_email = AsyncMock()
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailClient", return_value=email_client_instance),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+
+        commands.move(destination="Pre-Delete Temp", from_address="ci_activity@noreply.github.com")
+
+        email_client_instance.move_email.assert_not_awaited()
+        mock_console.print.assert_called()
+
+
+def test_move_uses_existing_folder_id_without_creating_new_folder() -> None:
+    """move should treat an existing Graph folder ID as the destination."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    destination_folder = MagicMock(id="folder-dst", display_name="Nested Folder")
+    email_client_instance = MagicMock()
+    email_client_instance.resolve_folder = AsyncMock(return_value=destination_folder)
+    email_client_instance.list_emails = AsyncMock(return_value=[])
+    email_client_instance.move_email = AsyncMock()
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailClient", return_value=email_client_instance),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+
+        commands.move(destination="AQMk-folder-id", from_address="sender@example.com")
+
+        email_client_instance.resolve_folder.assert_awaited_once_with("AQMk-folder-id")
+        mock_console.print.assert_called()
+
+
+def test_move_uses_well_known_folder_alias_without_creating_custom_folder() -> None:
+    """move should resolve well-known aliases like deleted via resolve_folder."""
+    mock_token_cache = MagicMock()
+
+    fake_client = MagicMock()
+    fake_authenticator = MagicMock()
+    fake_authenticator.get_client = AsyncMock(return_value=fake_client)
+
+    destination_folder = MagicMock(id="deleteditems", display_name="Deleted Items")
+    email_client_instance = MagicMock()
+    email_client_instance.resolve_folder = AsyncMock(return_value=destination_folder)
+    email_client_instance.list_emails = AsyncMock(return_value=[])
+    email_client_instance.move_email = AsyncMock()
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator", autospec=True) as mock_graph_auth,
+        patch("src.cli.commands.EmailClient", return_value=email_client_instance),
+        patch("src.cli.commands.console") as mock_console,
+    ):
+        mock_graph_auth.from_settings.return_value = fake_authenticator
+
+        commands.move(destination="deleted", from_address="sender@example.com")
+
+        email_client_instance.resolve_folder.assert_awaited_once_with("deleted")
+        email_client_instance.move_email.assert_not_awaited()
         mock_console.print.assert_called()
 
 

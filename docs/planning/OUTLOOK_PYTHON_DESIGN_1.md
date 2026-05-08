@@ -16,7 +16,7 @@ Basic authentication (username/password via IMAP) has been **deprecated for year
 2. **Add API permissions** (delegated – most common for personal use)
 
    - Microsoft Graph → Delegated permissions
-   - `Mail.Read` (minimum)
+   - `Mail.ReadWrite` (recommended if the app needs to modify mail)
    - `offline_access` (recommended → refresh tokens)
    - `User.Read` (usually added automatically)
 
@@ -26,7 +26,7 @@ Basic authentication (username/password via IMAP) has been **deprecated for year
 
    You will also need:
    - Tenant = `common` (for personal Microsoft accounts)
-   - Scopes = `["https://graph.microsoft.com/Mail.Read", "https://graph.microsoft.com/offline_access", "https://graph.microsoft.com/User.Read"]`
+   - Scopes = `["https://graph.microsoft.com/Mail.ReadWrite", "https://graph.microsoft.com/offline_access", "https://graph.microsoft.com/User.Read"]`
 
 4. **Most convenient libraries in 2025**
 

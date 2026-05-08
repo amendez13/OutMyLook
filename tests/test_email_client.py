@@ -6,6 +6,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from kiota_abstractions.method import Method
 
 from src.email.client import EmailClient
 from src.email.filters import EmailFilter
@@ -165,6 +166,41 @@ async def test_list_emails_without_request_config_uses_default_get() -> None:
 
     with patch.object(client, "_build_messages_request_config", return_value=None):
         emails = await client.list_emails(folder="Inbox", limit=10, skip=0)
+
+    messages_request.get.assert_awaited_once_with()
+    assert len(emails) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_emails_without_folder_uses_mailbox_messages() -> None:
+    """list_emails should use the mailbox messages collection when folder is None."""
+    graph_client = MagicMock()
+
+    message = MagicMock()
+    message.id = "msg-12"
+    message.subject = "Hello"
+    message.sender = MagicMock()
+    message.sender.email_address = MagicMock()
+    message.sender.email_address.address = "alice@example.com"
+    message.sender.email_address.name = "Alice"
+    message.received_date_time = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    message.body_preview = "Preview"
+    message.body = MagicMock(content="Body")
+    message.is_read = False
+    message.has_attachments = True
+    message.parent_folder_id = "inbox"
+
+    response = MagicMock()
+    response.value = [message]
+
+    messages_request = MagicMock()
+    messages_request.get = AsyncMock(return_value=response)
+    graph_client.me.messages = messages_request
+
+    client = EmailClient(graph_client)
+
+    with patch.object(client, "_build_messages_request_config", return_value=None):
+        emails = await client.list_emails(folder=None, limit=10, skip=0)
 
     messages_request.get.assert_awaited_once_with()
     assert len(emails) == 1
@@ -397,6 +433,149 @@ def test_get_folder_messages_request_uses_by_mail_folder_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ensure_folder_returns_existing_match_case_insensitive() -> None:
+    """ensure_folder should reuse an existing folder when names match."""
+    client = EmailClient(MagicMock())
+    folder = MailFolder(id="folder-1", display_name="Pre-Delete")
+
+    with patch.object(client, "list_folders", AsyncMock(return_value=[folder])):
+        resolved = await client.ensure_folder("pre-delete")
+
+    assert resolved is folder
+
+
+@pytest.mark.asyncio
+async def test_ensure_folder_creates_and_refetches() -> None:
+    """ensure_folder should create missing folders and return the created folder."""
+    client = EmailClient(MagicMock())
+    created_folder = MailFolder(id="folder-2", display_name="Pre-Delete")
+
+    with (
+        patch.object(client, "list_folders", AsyncMock(return_value=[])),
+        patch.object(client, "_create_folder", AsyncMock(return_value=created_folder)) as create_folder,
+    ):
+        resolved = await client.ensure_folder("Pre-Delete")
+
+    create_folder.assert_awaited_once_with("Pre-Delete")
+    assert resolved == created_folder
+
+
+@pytest.mark.asyncio
+async def test_move_email_posts_move_request() -> None:
+    """move_email should post a move request with the resolved destination ID."""
+    request_adapter = MagicMock()
+    request_adapter.send_primitive_async = AsyncMock(return_value=b"{}")
+    graph_client = MagicMock(request_adapter=request_adapter)
+    client = EmailClient(graph_client)
+
+    with patch.object(client, "_resolve_folder_id", AsyncMock(return_value="folder-123")):
+        await client.move_email("message-1", "Archive")
+
+    request_info = request_adapter.send_primitive_async.await_args.args[0]
+    assert request_info.http_method == Method.POST
+    assert request_info.url_template == "{+baseurl}/me/messages/{message%2Did}/move"
+    assert request_info.path_parameters["message%2Did"] == "message-1"
+    assert b"folder-123" in request_info.content
+
+
+@pytest.mark.asyncio
+async def test_resolve_folder_prefers_existing_graph_folder_id() -> None:
+    """resolve_folder should return an existing folder when the input is a Graph ID."""
+    client = EmailClient(MagicMock())
+    folder = MailFolder(id="folder-1", display_name="Nested")
+
+    with (
+        patch.object(client, "get_folder", AsyncMock(return_value=folder)) as get_folder,
+        patch.object(client, "_resolve_folder_id", AsyncMock()) as resolve_folder_id,
+        patch.object(client, "ensure_folder", AsyncMock()) as ensure_folder,
+    ):
+        resolved = await client.resolve_folder("folder-1")
+
+    get_folder.assert_awaited_once_with("folder-1")
+    resolve_folder_id.assert_not_awaited()
+    ensure_folder.assert_not_awaited()
+    assert resolved is folder
+
+
+@pytest.mark.asyncio
+async def test_resolve_folder_uses_well_known_alias_before_creating() -> None:
+    """resolve_folder should use resolved well-known aliases before creating folders."""
+    client = EmailClient(MagicMock())
+    deleted_items = MailFolder(id="deleteditems", display_name="Deleted Items")
+
+    with (
+        patch.object(client, "get_folder", AsyncMock(side_effect=[None, deleted_items])) as get_folder,
+        patch.object(client, "_resolve_folder_id", AsyncMock(return_value="deleteditems")) as resolve_folder_id,
+        patch.object(client, "ensure_folder", AsyncMock()) as ensure_folder,
+    ):
+        resolved = await client.resolve_folder("deleted")
+
+    assert get_folder.await_args_list[0].args == ("deleted",)
+    assert get_folder.await_args_list[1].args == ("deleteditems",)
+    resolve_folder_id.assert_awaited_once_with("deleted")
+    ensure_folder.assert_not_awaited()
+    assert resolved is deleted_items
+
+
+@pytest.mark.asyncio
+async def test_resolve_folder_creates_when_no_existing_folder_matches() -> None:
+    """resolve_folder should create a folder only when nothing resolves."""
+    client = EmailClient(MagicMock())
+    created_folder = MailFolder(id="folder-2", display_name="Pre-Delete")
+
+    with (
+        patch.object(client, "get_folder", AsyncMock(return_value=None)) as get_folder,
+        patch.object(client, "_resolve_folder_id", AsyncMock(return_value="Pre-Delete")) as resolve_folder_id,
+        patch.object(client, "ensure_folder", AsyncMock(return_value=created_folder)) as ensure_folder,
+    ):
+        resolved = await client.resolve_folder("Pre-Delete")
+
+    get_folder.assert_awaited_once_with("Pre-Delete")
+    resolve_folder_id.assert_awaited_once_with("Pre-Delete")
+    ensure_folder.assert_awaited_once_with("Pre-Delete")
+    assert resolved is created_folder
+
+
+@pytest.mark.asyncio
+async def test_get_folder_returns_model() -> None:
+    """get_folder should fetch and map a folder by Graph ID."""
+    graph_client = MagicMock()
+
+    folder_payload = MagicMock()
+    folder_payload.id = "folder-1"
+    folder_payload.display_name = "Nested"
+    folder_payload.parent_folder_id = "parent-1"
+    folder_payload.child_folder_count = 0
+    folder_payload.total_item_count = 4
+    folder_payload.unread_item_count = 1
+
+    folder_request = MagicMock()
+    folder_request.get = AsyncMock(return_value=folder_payload)
+    graph_client.me.mail_folders.by_id.return_value = folder_request
+
+    client = EmailClient(graph_client)
+    folder = await client.get_folder("folder-1")
+
+    graph_client.me.mail_folders.by_id.assert_called_with("folder-1")
+    assert folder is not None
+    assert folder.id == "folder-1"
+
+
+@pytest.mark.asyncio
+async def test_get_folder_returns_none_on_error() -> None:
+    """get_folder should return None when the folder lookup fails."""
+    graph_client = MagicMock()
+    folder_request = MagicMock()
+    folder_request.get = AsyncMock(side_effect=RuntimeError("missing"))
+    graph_client.me.mail_folders.by_id.return_value = folder_request
+
+    client = EmailClient(graph_client)
+    folder = await client.get_folder("folder-1")
+
+    assert folder is None
+
+
+@pytest.mark.asyncio
 async def test_resolve_folder_id_returns_well_known() -> None:
     """_resolve_folder_id should map well-known folders."""
     client = EmailClient(MagicMock())
@@ -499,7 +678,12 @@ async def test_list_emails_passes_filter_query() -> None:
     with patch.object(client, "_build_messages_request_config", return_value=config) as mock_config:
         await client.list_emails(folder="Inbox", limit=5, skip=0, email_filter=email_filter)
 
-    mock_config.assert_called_with(limit=5, skip=0, filter_query=email_filter.build())
+    mock_config.assert_called_with(
+        limit=5,
+        skip=0,
+        filter_query=email_filter.build(),
+        include_orderby=True,
+    )
 
 
 def test_build_folders_request_config_returns_none_when_builder_missing() -> None:

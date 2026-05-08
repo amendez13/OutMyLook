@@ -85,7 +85,7 @@ registration to obtain a client ID. No client secret is required.
    - Under **Advanced settings**, enable **Allow public client flows**.
 7. Add Microsoft Graph permissions:
    - Go to **API permissions** -> **Add a permission** -> **Microsoft Graph** -> **Delegated permissions**.
-   - Add: `Mail.Read`, `User.Read`, and `offline_access` (under OpenID permissions).
+   - Add: `Mail.ReadWrite`, `User.Read`, and `offline_access` (under OpenID permissions).
    - If you're in an organization, click **Grant admin consent** if required.
 
 Notes:

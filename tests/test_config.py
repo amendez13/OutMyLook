@@ -18,7 +18,7 @@ class TestAzureSettings:
         assert settings.client_id == ""
         assert settings.tenant == "common"
         assert len(settings.scopes) == 3
-        assert "https://graph.microsoft.com/Mail.Read" in settings.scopes
+        assert "https://graph.microsoft.com/Mail.ReadWrite" in settings.scopes
         assert "https://graph.microsoft.com/User.Read" in settings.scopes
         assert "offline_access" in settings.scopes
 

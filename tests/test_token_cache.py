@@ -20,7 +20,7 @@ def test_save_and_load_token(tmp_path: Path) -> None:
     cache = TokenCache(token_file)
 
     expires_on = _now_ts() + 3600
-    asyncio.run(cache.save_token("abc123", expires_on, ["Mail.Read"]))
+    asyncio.run(cache.save_token("abc123", expires_on, ["Mail.ReadWrite"]))
 
     # File should exist
     assert token_file.exists()

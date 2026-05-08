@@ -225,7 +225,7 @@ class GraphAuthenticator:
         self.client_id = client_id
         self.tenant = tenant
         self.scopes = scopes or [
-            "https://graph.microsoft.com/Mail.Read",
+            "https://graph.microsoft.com/Mail.ReadWrite",
             "https://graph.microsoft.com/User.Read",
             "offline_access",
         ]

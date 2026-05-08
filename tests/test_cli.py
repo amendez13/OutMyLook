@@ -201,7 +201,7 @@ def test_status_renders_panel() -> None:
     mock_token_cache = MagicMock()
     mock_token_cache.has_valid_token.return_value = True
     mock_token_cache.get_token_info = AsyncMock(
-        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.Read"]}
+        return_value={"expires_at": "2026-01-01T00:00:00+00:00", "scopes": ["Mail.ReadWrite"]}
     )
     mock_token_cache.is_token_expiring_soon.return_value = False
 
