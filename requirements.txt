@@ -18,4 +18,4 @@ greenlet>=3.0.0
 
 # CLI
 typer>=0.9.0
-rich>=13.7.0
+rich>=15.0.0
