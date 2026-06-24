@@ -51,10 +51,7 @@ All CI checks must pass before merging:
 
 **Strict Status Checks:**
 - `Lint and Code Quality` - Code formatting, linting, and type checking
-- `Test Python 3.10` - Tests on Python 3.10
-- `Test Python 3.11` - Tests on Python 3.11
 - `Test Python 3.12` - Tests on Python 3.12
-- `Validate Configuration` - Configuration file validation
 - `CI Status Check` - Final CI status verification
 
 **Non-blocking Checks:**
@@ -121,10 +118,7 @@ The configuration file is located at `scripts/github/branch-protection-config.js
   - [x] Require branches to be up to date before merging
   - Add these status checks:
     - `Lint and Code Quality`
-    - `Test Python 3.10`
-    - `Test Python 3.11`
     - `Test Python 3.12`
-    - `Validate Configuration`
     - `CI Status Check`
 - [x] Require conversation resolution before merging
 - [x] Require linear history
