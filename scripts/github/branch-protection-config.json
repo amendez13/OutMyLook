@@ -3,10 +3,7 @@
     "strict": true,
     "contexts": [
       "Lint and Code Quality",
-      "Test Python 3.10",
-      "Test Python 3.11",
       "Test Python 3.12",
-      "Validate Configuration",
       "CI Status Check"
     ]
   },

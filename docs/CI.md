@@ -24,7 +24,7 @@ The CI pipeline runs on every push to `main` and `develop` branches, and on all 
 
 **Purpose**: Run unit tests across Python versions
 
-**Matrix**: Python 3.10, 3.11, 3.12
+**Matrix**: Python 3.12
 
 **Tools**:
 - **pytest**: Test framework
