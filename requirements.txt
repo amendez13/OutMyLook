@@ -8,7 +8,7 @@ azure-identity>=1.25.3
 
 # Configuration and validation
 pydantic>=2.13.4
-pydantic-settings>=2.14.2
+pydantic-settings>=2.15.0
 
 # Database
 sqlalchemy>=2.0.51
