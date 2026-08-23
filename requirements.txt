@@ -11,7 +11,7 @@ pydantic>=2.13.4
 pydantic-settings>=2.15.0
 
 # Database
-sqlalchemy>=2.0.51
+sqlalchemy>=2.0.52
 alembic>=1.19.0
 aiosqlite>=0.22.1
 greenlet>=3.5.5
