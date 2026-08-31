@@ -17,5 +17,5 @@ aiosqlite>=0.22.1
 greenlet>=3.5.5
 
 # CLI
-typer>=0.27.1
+typer>=0.27.2
 rich>=15.0.0
