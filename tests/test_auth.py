@@ -294,6 +294,34 @@ class TestGraphAuthenticator:
         assert auth.tenant == azure_settings.tenant
         assert auth.scopes == azure_settings.scopes
 
+    def test_get_token_omits_offline_access(self, tmp_path: Path) -> None:
+        """Reserved offline_access must not be part of the MSAL cache lookup."""
+        from src.auth.authenticator import CachedTokenCredential
+
+        credential = CachedTokenCredential(
+            client_id="test-client-id",
+            tenant_id="common",
+            cache_dir=tmp_path,
+            auth_record_file=tmp_path / "missing-auth-record.json",
+        )
+        device = Mock()
+        device.get_token.return_value = Mock(token="token", expires_on=123)
+        with patch.object(credential, "_get_device_code_credential", return_value=device):
+            credential.get_token(
+                "https://graph.microsoft.com/Mail.Read",
+                "offline_access",
+            )
+
+        requested = device.get_token.call_args.args
+        assert "offline_access" not in requested
+        assert "https://graph.microsoft.com/Mail.Read" in requested
+
+    @pytest.mark.asyncio
+    async def test_recover_cached_session_fails_closed(self, authenticator: GraphAuthenticator) -> None:
+        """Recovery reports failure instead of starting an interactive login."""
+        with patch.object(authenticator, "_create_credential", side_effect=AuthenticationError("interaction required")):
+            assert await authenticator.recover_cached_session() is False
+
     def test_create_credential(self, authenticator: GraphAuthenticator) -> None:
         """Test creating CachedTokenCredential."""
         from src.auth.authenticator import CachedTokenCredential

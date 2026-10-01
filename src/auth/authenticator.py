@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from azure.core.credentials import AccessToken, TokenCredential
 from azure.identity import AuthenticationRecord, DeviceCodeCredential, TokenCachePersistenceOptions
@@ -13,6 +13,17 @@ from src.auth.token_cache import TokenCache
 from src.config.settings import AzureSettings
 
 logger = logging.getLogger(__name__)
+
+
+def _refuse_device_code(verification_uri: str, user_code: str, expires_on: object) -> None:
+    """Log the device code and stop. Headless timers cannot wait for a browser."""
+    del expires_on
+    logger.error(
+        "Authentication requires interaction. Open %s and enter code %s.",
+        verification_uri,
+        user_code,
+    )
+    raise AuthenticationError("Authentication requires interaction. " f"Open {verification_uri} and enter code {user_code}.")
 
 
 class CachedTokenCredential(TokenCredential):
@@ -36,6 +47,7 @@ class CachedTokenCredential(TokenCredential):
         token_cache: Optional[TokenCache] = None,
         cache_dir: Optional[Path] = None,
         auth_record_file: Optional[Path] = None,
+        prompt_callback: Optional[Callable[..., None]] = None,
     ):
         """Initialize the CachedTokenCredential.
 
@@ -52,6 +64,7 @@ class CachedTokenCredential(TokenCredential):
         self._device_code_credential: Optional[DeviceCodeCredential] = None
         self._auth_record_file = auth_record_file
         self._auth_record: Optional[AuthenticationRecord] = None
+        self._prompt_callback = prompt_callback
 
         # Determine cache directory for MSAL token cache
         if cache_dir:
@@ -81,11 +94,15 @@ class CachedTokenCredential(TokenCredential):
                 allow_unencrypted_storage=True,  # Required for non-GUI environments
             )
 
+            credential_kwargs: dict[str, Any] = {}
+            if self._prompt_callback is not None:
+                credential_kwargs["prompt_callback"] = self._prompt_callback
             self._device_code_credential = DeviceCodeCredential(
                 client_id=self._client_id,
                 tenant_id=self._tenant_id,
                 cache_persistence_options=cache_options,
                 authentication_record=self._auth_record,
+                **credential_kwargs,
             )
             logger.debug("Created DeviceCodeCredential with persistent token cache")
 
@@ -116,18 +133,25 @@ class CachedTokenCredential(TokenCredential):
         Returns:
             An AccessToken with the token string and expiration time
         """
-        # Use Azure SDK's credential which handles caching and refresh
+        # offline_access is reserved. Passing it through makes the MSAL cache key
+        # miss a refresh token that was stored without that scope.
+        requested_scopes = tuple(scope for scope in scopes if scope != "offline_access") or scopes
         credential = self._get_device_code_credential()
 
         logger.debug("Requesting token from Azure SDK (will use cache/refresh if available)")
-        token = credential.get_token(*scopes, claims=claims, tenant_id=tenant_id, enable_cae=enable_cae, **kwargs)
+        token = credential.get_token(
+            *requested_scopes,
+            claims=claims,
+            tenant_id=tenant_id,
+            enable_cae=enable_cae,
+            **kwargs,
+        )
 
         self._persist_auth_record(credential)
 
-        # Update our token cache for quick access checks
         if self._token_cache:
             try:
-                self._save_to_cache(token, list(scopes))
+                self._save_to_cache(token, list(requested_scopes))
             except Exception as e:
                 logger.warning(f"Failed to update token cache: {e}")
 
@@ -253,7 +277,7 @@ class GraphAuthenticator:
             token_cache=token_cache,
         )
 
-    def _create_credential(self) -> CachedTokenCredential:
+    def _create_credential(self, prompt_callback: Optional[Callable[..., None]] = None) -> CachedTokenCredential:
         """Create a credential that uses cached tokens when available.
 
         Returns:
@@ -273,16 +297,15 @@ class GraphAuthenticator:
             client_id=self.client_id,
             tenant_id=self.tenant,
             token_cache=self.token_cache,
+            prompt_callback=prompt_callback,
         )
 
-    async def authenticate(self) -> GraphServiceClient:
+    async def authenticate(self, *, interactive: bool = True) -> GraphServiceClient:
         """Perform device code authentication flow.
 
-        This method will:
-        1. Check if valid cached token exists (handled by CachedTokenCredential)
-        2. If not, initiate device code flow (user must visit URL and enter code)
-        3. Cache the token for future use (handled by CachedTokenCredential)
-        4. Return authenticated GraphServiceClient
+        Interactive login waits for the user to enter a device code. Headless
+        callers pass ``interactive=False`` so an expired refresh token fails
+        immediately instead of blocking a timer.
 
         Returns:
             Authenticated GraphServiceClient instance
@@ -291,14 +314,12 @@ class GraphAuthenticator:
             AuthenticationError: If authentication fails
         """
         try:
-            # Create credential that handles caching internally
-            self._credential = self._create_credential()
-
-            # Create Graph client with the credential
+            if interactive:
+                self._credential = self._create_credential()
+            else:
+                self._credential = self._create_credential(prompt_callback=_refuse_device_code)
             self._client = GraphServiceClient(credentials=self._credential, scopes=self.scopes)
 
-            # Test authentication by getting user info
-            # This will trigger the credential's get_token which checks cache first
             logger.debug("Testing authentication by fetching user info")
             user = await self._client.me.get()
 
@@ -314,6 +335,26 @@ class GraphAuthenticator:
         except Exception as e:
             logger.error(f"Authentication failed: {e}")
             raise AuthenticationError(f"Authentication failed: {e}") from e
+
+    async def recover_cached_session(self) -> bool:
+        """Refresh tokens.json from the MSAL cache without user interaction.
+
+        Payroll checks ``status`` hours after the access token expires. A valid
+        refresh token is still a signed-in session, so status must renew the
+        short-lived access token before reporting the user logged out.
+        """
+        if not self.client_id:
+            return False
+        try:
+            credential = self._create_credential(prompt_callback=_refuse_device_code)
+            scopes = [scope for scope in self.scopes if scope != "offline_access"] or list(self.scopes)
+            token = credential.get_token(*scopes)
+            if self.token_cache is not None:
+                await self.token_cache.save_token(token.token, token.expires_on, scopes)
+            return True
+        except Exception as exc:
+            logger.info("Silent authentication recovery failed: %s", exc)
+            return False
 
     def is_authenticated(self) -> bool:
         """Check if valid cached token exists.
@@ -342,7 +383,7 @@ class GraphAuthenticator:
             AuthenticationError: If authentication fails
         """
         if self._client is None:
-            return await self.authenticate()
+            return await self.authenticate(interactive=False)
         return self._client
 
     async def refresh_token(self) -> None:

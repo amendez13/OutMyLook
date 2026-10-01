@@ -38,19 +38,67 @@ def test_status_not_authenticated() -> None:
     """When no valid token exists, status() should inform the user (no exception)."""
     mock_token_cache = MagicMock()
     mock_token_cache.has_valid_token.return_value = False
+    mock_auth = MagicMock()
+    mock_auth.recover_cached_session = AsyncMock(return_value=False)
 
     with (
         patch("src.cli.commands.get_settings", return_value=make_settings()),
         patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator.from_settings", return_value=mock_auth),
         patch("src.cli.commands.get_session", return_value=fake_session_context()),
         patch("src.cli.commands._get_email_count", new=AsyncMock(return_value=0)),
         patch("src.cli.commands.console") as mock_console,
     ):
-        # Call the command which uses asyncio.run internally
         commands.status()
 
-        # console.print should have been called to show "Not authenticated" message
+        mock_auth.recover_cached_session.assert_called_once()
         mock_console.print.assert_called()
+
+
+def test_status_recovers_expired_access_token() -> None:
+    """An expired access token with a usable refresh token is still authenticated."""
+    mock_token_cache = MagicMock()
+    valid = {"value": False}
+
+    def has_valid_token() -> bool:
+        return valid["value"]
+
+    def recover() -> bool:
+        valid["value"] = True
+        return True
+
+    mock_token_cache.has_valid_token.side_effect = has_valid_token
+    mock_token_cache.get_token_info = AsyncMock(
+        return_value={
+            "expires_at": "2026-01-01T00:00:00+00:00",
+            "seconds_until_expiry": 3600,
+            "scopes": ["Mail.Read"],
+            "cached_at": "2026-01-01T00:00:00+00:00",
+        }
+    )
+    mock_token_cache.is_token_expiring_soon.return_value = False
+    mock_auth = MagicMock()
+    mock_auth.recover_cached_session = AsyncMock(side_effect=recover)
+    captured: dict[str, list[tuple[str, str]]] = {}
+
+    def capture_panel(lines, **kwargs):
+        captured["lines"] = list(lines)
+        return MagicMock()
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator.from_settings", return_value=mock_auth),
+        patch("src.cli.commands.build_status_panel", side_effect=capture_panel),
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
+        patch("src.cli.commands._get_email_count", new=AsyncMock(return_value=0)),
+        patch("src.cli.commands.console"),
+    ):
+        commands.status()
+
+    auth_value = dict(captured["lines"])["Authentication"]
+    assert "Authenticated" in auth_value
+    assert "Not authenticated" not in auth_value
 
 
 def test_status_authenticated_shows_token_info() -> None:
