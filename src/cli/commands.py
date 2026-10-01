@@ -266,7 +266,11 @@ async def _status_async() -> None:
 
         auth_lines: list[tuple[str, str]] = []
         token_info = None
-        if token_cache.has_valid_token():
+        recovered = True
+        if not token_cache.has_valid_token():
+            authenticator = GraphAuthenticator.from_settings(settings.azure, token_cache=token_cache)
+            recovered = await authenticator.recover_cached_session()
+        if recovered and token_cache.has_valid_token():
             token_info = await token_cache.get_token_info()
             user_hint = None if token_info is None else token_info.get("user_principal_name")
             auth_value = f"✓ Logged in as {user_hint}" if user_hint else "✓ Authenticated"
