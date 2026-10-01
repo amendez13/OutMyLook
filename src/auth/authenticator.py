@@ -114,6 +114,7 @@ class CachedTokenCredential(TokenCredential):
         claims: Optional[str] = None,
         tenant_id: Optional[str] = None,
         enable_cae: bool = False,
+        persist: bool = True,
         **kwargs: Any,
     ) -> AccessToken:
         """Get an access token for the specified scopes.
@@ -149,7 +150,7 @@ class CachedTokenCredential(TokenCredential):
 
         self._persist_auth_record(credential)
 
-        if self._token_cache:
+        if persist and self._token_cache:
             try:
                 self._save_to_cache(token, list(requested_scopes))
             except Exception as e:
@@ -348,10 +349,13 @@ class GraphAuthenticator:
         try:
             credential = self._create_credential(prompt_callback=_refuse_device_code)
             scopes = [scope for scope in self.scopes if scope != "offline_access"] or list(self.scopes)
-            token = credential.get_token(*scopes)
-            if self.token_cache is not None:
-                await self.token_cache.save_token(token.token, token.expires_on, scopes)
-            return True
+            # persist=False keeps this path to one awaited write. get_token()
+            # otherwise schedules a second save on the running event loop.
+            token = credential.get_token(*scopes, persist=False)
+            if self.token_cache is None:
+                return True
+            await self.token_cache.save_token(token.token, token.expires_on, scopes)
+            return self.token_cache.has_valid_token()
         except Exception as exc:
             logger.info("Silent authentication recovery failed: %s", exc)
             return False

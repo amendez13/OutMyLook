@@ -101,6 +101,41 @@ def test_status_recovers_expired_access_token() -> None:
     assert "Not authenticated" not in auth_value
 
 
+def test_status_failed_recovery_stays_logged_out() -> None:
+    """A token written beside a failed recovery must not count as signed in."""
+    mock_token_cache = MagicMock()
+    valid = {"value": False}
+
+    def has_valid_token() -> bool:
+        return valid["value"]
+
+    async def recover() -> bool:
+        valid["value"] = True
+        return False
+
+    mock_token_cache.has_valid_token.side_effect = has_valid_token
+    mock_auth = MagicMock()
+    mock_auth.recover_cached_session = AsyncMock(side_effect=recover)
+    captured: dict[str, list[tuple[str, str]]] = {}
+
+    def capture_panel(lines, **kwargs):
+        captured["lines"] = list(lines)
+        return MagicMock()
+
+    with (
+        patch("src.cli.commands.get_settings", return_value=make_settings()),
+        patch("src.cli.commands.TokenCache", return_value=mock_token_cache),
+        patch("src.cli.commands.GraphAuthenticator.from_settings", return_value=mock_auth),
+        patch("src.cli.commands.build_status_panel", side_effect=capture_panel),
+        patch("src.cli.commands.get_session", return_value=fake_session_context()),
+        patch("src.cli.commands._get_email_count", new=AsyncMock(return_value=0)),
+        patch("src.cli.commands.console"),
+    ):
+        commands.status()
+
+    assert dict(captured["lines"])["Authentication"] == "✗ Not authenticated"
+
+
 def test_status_authenticated_shows_token_info() -> None:
     """When a valid token exists, status() should display token info."""
     mock_token_cache = MagicMock()
