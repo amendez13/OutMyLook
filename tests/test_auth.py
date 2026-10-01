@@ -294,6 +294,122 @@ class TestGraphAuthenticator:
         assert auth.tenant == azure_settings.tenant
         assert auth.scopes == azure_settings.scopes
 
+    def test_get_token_omits_offline_access(self, tmp_path: Path) -> None:
+        """Reserved offline_access must not be part of the MSAL cache lookup."""
+        from src.auth.authenticator import CachedTokenCredential
+
+        credential = CachedTokenCredential(
+            client_id="test-client-id",
+            tenant_id="common",
+            cache_dir=tmp_path,
+            auth_record_file=tmp_path / "missing-auth-record.json",
+        )
+        device = Mock()
+        device.get_token.return_value = Mock(token="token", expires_on=123)
+        with patch.object(credential, "_get_device_code_credential", return_value=device):
+            credential.get_token(
+                "https://graph.microsoft.com/Mail.Read",
+                "offline_access",
+            )
+
+        requested = device.get_token.call_args.args
+        assert "offline_access" not in requested
+        assert "https://graph.microsoft.com/Mail.Read" in requested
+
+    @pytest.mark.asyncio
+    async def test_recover_cached_session_fails_closed(self, authenticator: GraphAuthenticator) -> None:
+        """Recovery reports failure instead of starting an interactive login."""
+        with patch.object(authenticator, "_create_credential", side_effect=AuthenticationError("interaction required")):
+            assert await authenticator.recover_cached_session() is False
+
+    @pytest.mark.asyncio
+    async def test_recover_persists_once_without_scheduling_another_save(self, authenticator: GraphAuthenticator) -> None:
+        """Recovery owns the only tokens.json write and requires that write to stick."""
+        credential = Mock()
+        credential.get_token.return_value = Mock(token="access-token", expires_on=9999999999)
+
+        async def save_token(*args, **kwargs):
+            authenticator.token_cache.has_valid_token.return_value = True
+
+        authenticator.token_cache.save_token = AsyncMock(side_effect=save_token)
+        with patch.object(authenticator, "_create_credential", return_value=credential):
+            assert await authenticator.recover_cached_session() is True
+
+        credential.get_token.assert_called_once()
+        assert credential.get_token.call_args.kwargs["persist"] is False
+        authenticator.token_cache.save_token.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_recover_stops_when_device_code_is_required(self, authenticator: GraphAuthenticator) -> None:
+        """An expired refresh grant must not start device-code polling."""
+        created: list[Mock] = []
+
+        class FakeDeviceCodeCredential:
+            def __init__(self, *args, **kwargs):
+                self.prompt_callback = kwargs.get("prompt_callback")
+                self.polls = 0
+                created.append(self)
+
+            def get_token(self, *scopes, **kwargs):
+                self.polls += 1
+                if self.prompt_callback is not None:
+                    self.prompt_callback("https://login.example/device", "CODE", None)
+                return Mock(token="unused", expires_on=1)
+
+            def close(self) -> None:
+                return None
+
+        with patch("src.auth.authenticator.DeviceCodeCredential", FakeDeviceCodeCredential):
+            assert await authenticator.recover_cached_session() is False
+
+        assert created[0].polls == 1
+        assert created[0].prompt_callback is not None
+        authenticator.token_cache.save_token.assert_not_awaited()
+
+    def test_interactive_login_does_not_install_the_refusal_callback(self, authenticator: GraphAuthenticator) -> None:
+        """login keeps the Azure credential's normal device-code wait."""
+        credential = authenticator._create_credential()
+        device = Mock()
+        device.get_token.return_value = Mock(token="token", expires_on=1)
+        with patch("src.auth.authenticator.DeviceCodeCredential", return_value=device) as device_cls:
+            credential.get_token("https://graph.microsoft.com/Mail.Read")
+
+        assert "prompt_callback" not in device_cls.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_get_client_refuses_device_code_without_waiting(self, authenticator: GraphAuthenticator) -> None:
+        """Headless fetch fails as soon as Microsoft asks for a browser."""
+        created: list[Mock] = []
+
+        class FakeDeviceCodeCredential:
+            def __init__(self, *args, **kwargs):
+                self.prompt_callback = kwargs.get("prompt_callback")
+                created.append(self)
+
+            def get_token(self, *scopes, **kwargs):
+                if self.prompt_callback is not None:
+                    self.prompt_callback("https://login.example/device", "CODE", None)
+                return Mock(token="unused", expires_on=1)
+
+            def close(self) -> None:
+                return None
+
+        graph = Mock()
+
+        async def fetch_me():
+            authenticator._credential.get_token("https://graph.microsoft.com/Mail.Read")
+            return Mock(user_principal_name="person@example.com")
+
+        graph.me.get = fetch_me
+        with (
+            patch("src.auth.authenticator.DeviceCodeCredential", FakeDeviceCodeCredential),
+            patch("src.auth.authenticator.GraphServiceClient", return_value=graph),
+            pytest.raises(AuthenticationError, match="requires interaction"),
+        ):
+            await authenticator.get_client()
+
+        assert created[0].prompt_callback is not None
+
     def test_create_credential(self, authenticator: GraphAuthenticator) -> None:
         """Test creating CachedTokenCredential."""
         from src.auth.authenticator import CachedTokenCredential
