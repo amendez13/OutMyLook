@@ -4,7 +4,7 @@ python-dotenv>=1.2.4
 
 # Microsoft Graph API
 msgraph-sdk>=1.63.0
-azure-identity>=1.25.3
+azure-identity>=1.26.0
 
 # Configuration and validation
 pydantic>=2.13.5
