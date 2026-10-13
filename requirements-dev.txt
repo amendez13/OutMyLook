@@ -9,7 +9,7 @@ pytest-asyncio>=1.4.0
 respx>=0.23.1
 
 # Code quality
-black>=26.5.1
+black>=26.10.1
 isort>=9.0.1
 flake8>=7.3.0
 pylint>=4.0.9
