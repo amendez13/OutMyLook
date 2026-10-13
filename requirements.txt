@@ -3,7 +3,7 @@ PyYAML>=6.0.3
 python-dotenv>=1.2.4
 
 # Microsoft Graph API
-msgraph-sdk>=1.63.0
+msgraph-sdk>=1.64.0
 azure-identity>=1.26.0
 
 # Configuration and validation
