@@ -14,7 +14,7 @@ isort>=9.0.1
 flake8>=7.3.0
 pylint>=4.0.9
 mypy>=2.4.0
-types-PyYAML>=6.0.12.20260815
+types-PyYAML>=6.0.12.20260906
 
 # Security
 bandit>=1.9.4
